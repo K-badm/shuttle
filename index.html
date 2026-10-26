@@ -298,6 +298,10 @@ function buildOnce(P, cfg, pairs, fixed=[], off={}){
   // （同じ回数なら時間どおりの人を先に出し、ならすときも遅刻者の −1 までは許す）
   const late=new Set(Object.keys(off).map(Number));
   const ac=id=>cnt[id]+(late.has(id)?0.5:0);
+  // 遅刻者は、時間どおりに来た人が全員1回ずつ試合に入るまで待つ（ユーザーの指定）。real は実際の出場回数（下駄なし）
+  const real={}; P.forEach(p=>real[p.id]=0);
+  const allPlayed=()=>P.every(p=>late.has(p.id)||real[p.id]>=1);
+  const roundOpen=[]; // そのラウンドで遅刻者が入れたか（ならしの入れ替えで使う）
   const mk=(a,b)=>a<b?a+"-"+b:b+"-"+a;
   const mt=(a,b)=>meet[mk(a,b)]||0;
   const pidx={}; pairs.forEach((pr,j)=>{pidx[pr.a]=j;pidx[pr.b]=j});
@@ -309,21 +313,25 @@ function buildOnce(P, cfg, pairs, fixed=[], off={}){
   fixed.forEach((rd,r)=>rd.games.forEach(g=>{
     const ps=g.teams.flat();
     for(let a=0;a<4;a++)for(let b=a+1;b<4;b++) meet[mk(ps[a].id,ps[b].id)]=mt(ps[a].id,ps[b].id)+1;
-    for(const p of ps) if(cnt[p.id]!==undefined){cnt[p.id]++;last[p.id]=r;if(g.cross)xc[p.id]++}
+    for(const p of ps) if(cnt[p.id]!==undefined){cnt[p.id]++;real[p.id]++;last[p.id]=r;if(g.cross)xc[p.id]++}
     g.pm.forEach(k=>{const j=pairs.findIndex(pr=>pr.k===k); if(j>=0) pc[j]++});
     if(g.cross) crossDone++;
     gi++;
   }));
   for(let r=fixed.length; gi<M; r++){
     const used=new Set(), games=[];
+    const open=allPlayed(); roundOpen[r]=open;
+    const ok=p=>open||!late.has(p.id); // まだ全員が1回入っていなければ、遅刻者はこのラウンドは休み
     for(let c=0;c<C && gi<M;c++){
       const i=gi;
-      const avail=P.filter(p=>!used.has(p.id));
+      let avail=P.filter(p=>!used.has(p.id)&&ok(p));
+      if(avail.length<4) avail=P.filter(p=>!used.has(p.id)); // 人が足りないときだけは遅刻者も入れる
       if(avail.length<4) break;
+      const inAv=new Set(avail.map(p=>p.id));
       const key=p=>ac(p.id)*10+(last[p.id]===r-1?2:0)+Math.random()*1.5;
       // ペア練の順番が来ている大会ペア
       const minC=Math.min(...avail.map(p=>ac(p.id)));
-      const due=pairs.map((pr,j)=>j).filter(j=>pc[j]<T && !used.has(pairs[j].a) && !used.has(pairs[j].b)
+      const due=pairs.map((pr,j)=>j).filter(j=>pc[j]<T && inAv.has(pairs[j].a) && inAv.has(pairs[j].b)
         && Math.max(ac(pairs[j].a),ac(pairs[j].b))<=minC+1
         && pc[j] < Math.floor((i+1)*T/M + phase[j]))
         .sort((x,y)=>pc[x]-pc[y]).slice(0,2);
@@ -386,7 +394,7 @@ function buildOnce(P, cfg, pairs, fixed=[], off={}){
       ng+=bad.length;
       const isX = cross || wideGame(best); // 交流戦の枠、または部の差が3以上の人がいる試合
       if(isX) crossDone++;
-      for(const p of best){cnt[p.id]++;last[p.id]=r;used.add(p.id);if(isX)xc[p.id]++}
+      for(const p of best){cnt[p.id]++;real[p.id]++;last[p.id]=r;used.add(p.id);if(isX)xc[p.id]++}
       games.push({no:i+1,court:c,cross:isX,teams:pair,bad,pm});
       gi++;
     }
@@ -403,9 +411,11 @@ function buildOnce(P, cfg, pairs, fixed=[], off={}){
     const lows=ids.filter(id=>ac(id)<ac(ids[ids.length-1])-1), highs=ids.filter(id=>ac(id)>ac(ids[0])+1);
     let bestSw=null,bs=Infinity;
     for(const rd of rounds.slice(fixed.length)) for(const g of rd.games) for(const t of g.teams) for(let s=0;s<2;s++){
+      const ri=rounds.indexOf(rd);
       const h=t[s]; if(!highs.includes(h.id)) continue;
       if(sameP(t[0].id,t[1].id) && g.pm.length) continue;
       for(const l of rd.rest){ if(!lows.includes(l.id) || ac(h.id)-ac(l.id)<=1) continue;
+        if(late.has(l.id) && roundOpen[ri]===false) continue; // 全員が1回入る前のラウンドに遅刻者を入れない
         if(g.cross && cls(l)!==cls(h)) continue;
         const others=g.teams.flat().filter(p=>p.id!==h.id);
         if(!g.cross && wideGame([...others,l])) continue; // 入れ替えで交流戦が増えないように
@@ -417,7 +427,7 @@ function buildOnce(P, cfg, pairs, fixed=[], off={}){
     if(!bestSw) break;
     const {rd,g,t,s,h,l}=bestSw;
     t[s]=l; rd.rest=rd.rest.filter(p=>p.id!==l.id).concat([h]).sort((a,b)=>a.num-b.num);
-    cnt[h.id]--; cnt[l.id]++; if(g.cross){xc[h.id]--;xc[l.id]++}
+    cnt[h.id]--; cnt[l.id]++; real[h.id]--; real[l.id]++; if(g.cross){xc[h.id]--;xc[l.id]++}
   }
   const vals=P.map(p=>ac(p.id)), mean=vals.reduce((s,v)=>s+v,0)/vals.length;
   const varc=vals.reduce((s,v)=>s+(v-mean)**2,0);
@@ -456,7 +466,11 @@ function tally(rounds,pairs){
 function generate(){
   const pairs=todayPairs();
   const keep=S.day&&S.day.done>0 ? S.day.done : 0;
-  if(!keep) S.day={date:TODAY,rounds:[],done:0,nums:null,off:{},joined:{},present:[]};
+  if(!keep){
+    S.day={date:TODAY,rounds:[],done:0,nums:null,off:{},joined:{},present:[]};
+    // まだどのラウンドも終わっていなくても、到着待ちから来た人は遅刻者として扱う（全員が1回入るまで待つ）
+    if(S.arrivedDate===TODAY) (S.arrived||[]).filter(id=>here().includes(id)).forEach(id=>{S.day.off[id]=0; S.day.joined[id]=0;});
+  }
   else {
     // 前回から増えた人（遅刻・戻ってきた人）は、その時点のみんなの平均試合数から数え始める
     const dy=S.day, pres=new Set(dy.present);
@@ -791,7 +805,7 @@ function viewSummary(){
   games.forEach(g=>g.teams.flat().forEach(p=>{if(!inP.has(p.id)) gone.set(p.id,p)}));
   const P=[...schedule.P,...gone.values()];
   const joined=S.day?.joined||{};
-  const st=p=>!inP.has(p.id)?' <span class="note">（早退）</span>':joined[p.id]!=null?` <span class="note">（第${joined[p.id]+1}Rから）</span>`:"";
+  const st=p=>!inP.has(p.id)?' <span class="note">（早退）</span>':joined[p.id]===0?` <span class="note">（遅刻）</span>`:joined[p.id]!=null?` <span class="note">（第${joined[p.id]+1}Rから）</span>`:"";
   const R=schedule.rounds.length;
   return `<section class="panel">
   <div><h2>集計</h2><p class="note">行をタップすると、組み合わせ画面でその人の試合を強調します。マス目は各ラウンドの出場<span class="admin">（橙は交流戦）</span>。</p></div>
@@ -838,6 +852,7 @@ document.addEventListener("click",e=>{
   if(act==="lateMark"){const xs=mselValues("mLate");if(!xs.length)return;waitSet();
     S.wait=[...new Set([...S.wait,...xs])];changed(true)}
   if(act==="lateIn"){const xs=mselValues("mIn");if(!xs.length)return;waitSet();
+    if(S.arrivedDate!==TODAY){S.arrived=[];S.arrivedDate=TODAY} S.arrived=[...new Set([...S.arrived,...xs])];
     S.wait=S.wait.filter(y=>!xs.includes(y)); xs.forEach(x=>{ if(!S.attend.includes(x)) S.attend.push(x) });changed(true)}
   if(act==="earlyOut"){const xs=mselValues("mOut");if(!xs.length)return;
     S.attend=S.attend.filter(y=>!xs.includes(y)); S.wait=(S.wait||[]).filter(y=>!xs.includes(y));changed(true)}
