@@ -138,6 +138,15 @@ body.user .match.cross{border-color:var(--line);box-shadow:none}
 .mh .mno{font-family:var(--f-mono);font-weight:600;color:var(--fg)}
 .tag{margin-left:auto;white-space:nowrap;flex:none;font-size:11px;font-weight:700;padding:1px 7px;border-radius:999px;background:var(--cork-soft);color:var(--cork)}
 .tag+.tag{margin-left:4px}
+.msel{flex:1;min-width:180px}
+.msel summary{list-style:none;cursor:pointer;border:1px solid var(--line);border-radius:7px;padding:7px 30px 7px 10px;background:var(--bg);position:relative;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.msel summary::-webkit-details-marker{display:none}
+.msel summary::after{content:"▾";position:absolute;right:10px;top:50%;transform:translateY(-50%);color:var(--muted)}
+.msel[open] summary::after{content:"▴"}
+.mlist2{display:grid;gap:0;max-height:260px;overflow:auto;border:1px solid var(--line);border-radius:7px;margin-top:4px;padding:4px 8px;background:var(--surface)}
+.mopt{display:flex;gap:8px;align-items:center;padding:7px 2px;font-size:14px;border-bottom:1px solid var(--line);cursor:pointer}
+.mopt:last-child{border-bottom:0}
+.mopt input{width:18px;height:18px;margin:0;accent-color:var(--court);flex:none}
 .tag.bad{background:var(--warn-soft);color:var(--warn)}
 .teams{display:grid;grid-template-columns:1fr auto 1fr;align-items:stretch}
 .team{display:grid;gap:4px;padding:8px 10px;min-width:0}
@@ -246,9 +255,13 @@ const wideGame = ps => Math.max(...ps.map(p=>p.level)) - Math.min(...ps.map(p=>p
 const MARKS = ["A","B","C","D","E","F"];
 const mkChip = k => k==null ? "" : `<span class="mk mk${k%6}" title="大会ペア${MARKS[k%6]}">${MARKS[k%6]}</span>`;
 
-/* 今日有効な大会ペア（両方が参加している組だけ） */
+/* 到着待ち（今日の参加者だが、遅刻でまだ来ていない人）。日付が変わったら空にする */
+function waitSet(){ if(S.waitDate!==TODAY){ S.wait=[]; S.waitDate=TODAY; } return new Set(S.wait||[]); }
+/* 今いる参加者（到着待ちの人を除く）。組み合わせはこの人たちだけで作る */
+function here(){ const w=waitSet(); return S.attend.filter(id=>!w.has(id)); }
+/* 今日有効な大会ペア（両方が来ている組だけ） */
 function todayPairs(){
-  const on=new Set(S.attend);
+  const on=new Set(here());
   return S.tp.map((p,k)=>({...p,k:p.k??k})).filter(p=>on.has(p.a)&&on.has(p.b));
 }
 /* 参加者に弱い順で番号: レベル5 → 1。試合が始まったら番号を固定し、途中参加の人には続きの番号を振る */
@@ -257,10 +270,10 @@ function players(){
   const fz=S.day&&S.day.nums;
   if(fz){
     let mx=Math.max(0,...Object.values(fz));
-    S.attend.forEach(id=>{ if(fz[id]==null) fz[id]=++mx; });
-    return S.attend.map(byId).filter(Boolean).sort((a,b)=>fz[a.id]-fz[b.id]).map(p=>({...p,num:fz[p.id],mk:mk[p.id]}));
+    here().forEach(id=>{ if(fz[id]==null) fz[id]=++mx; });
+    return here().map(byId).filter(Boolean).sort((a,b)=>fz[a.id]-fz[b.id]).map(p=>({...p,num:fz[p.id],mk:mk[p.id]}));
   }
-  const ps = S.attend.map(byId).filter(Boolean)
+  const ps = here().map(byId).filter(Boolean)
     .sort((a,b)=> b.level-a.level || a.id-b.id);
   return ps.map((p,i)=>({...p,num:i+1,mk:mk[p.id]}));
 }
@@ -449,9 +462,9 @@ function generate(){
     const dy=S.day, pres=new Set(dy.present);
     const fixedRaw=dy.rounds.slice(0,keep), real={};
     fixedRaw.forEach(rd=>rd.games.forEach(g=>g.teams.flat().forEach(id=>real[id]=(real[id]||0)+1)));
-    const base=S.attend.filter(id=>pres.has(id));
+    const base=here().filter(id=>pres.has(id));
     const avg=base.length? base.reduce((s,id)=>s+(real[id]||0)+(dy.off[id]||0),0)/base.length : 0;
-    S.attend.filter(id=>!pres.has(id)).forEach(id=>{
+    here().filter(id=>!pres.has(id)).forEach(id=>{
       dy.off[id]=Math.max(0,Math.round(avg)-(real[id]||0)); dy.joined[id]=keep;
     });
   }
@@ -463,7 +476,7 @@ function generate(){
     for(let t=0;t<80;t++){const s=buildOnce(P,S.cfg,pairs,fixed,S.day.off); if(!best||s.score<best.score) best=s}
     rounds=best.rounds;
   }
-  S.day.rounds=dehydrate(rounds); S.day.present=S.attend.slice(); save();
+  S.day.rounds=dehydrate(rounds); S.day.present=here(); save();
   schedule={...tally(rounds,pairs),rounds,P,pairs};
   stale=false;
 }
@@ -650,19 +663,20 @@ function viewMembers(){
 }
 function viewAttend(){
   const P=players(), num={}; P.forEach(p=>num[p.id]=p.num);
-  const all=[...S.members].sort((a,b)=>(num[a.id]?0:1)-(num[b.id]?0:1)||(num[a.id]||0)-(num[b.id]||0)||b.level-a.level);
+  const W=waitSet(), att=new Set(S.attend);
+  const all=[...S.members].sort((a,b)=>(num[a.id]?0:W.has(a.id)?1:2)-(num[b.id]?0:W.has(b.id)?1:2)||(num[a.id]||0)-(num[b.id]||0)||b.level-a.level);
   const dist=[1,2,3,4,5].map(l=>P.filter(p=>p.level===l).length), mx=Math.max(1,...dist);
   return `<section class="panel">
-  <div><h2>今日の参加者 <span class="no" style="font-size:15px">${P.length}人</span></h2>
+  <div><h2>今日の参加者 <span class="no" style="font-size:15px">${P.length}人${W.size?`＋遅刻${W.size}人`:""}</span></h2>
   <p class="note">チェックした人に、弱い順（5部から）で番号を振ります。番号は当日の呼び出し用です。</p></div>
   <div class="box"><h3>部ごとの人数</h3>
     <div class="dist">${dist.map((n,i)=>`<div class="b"><span>${n}</span><div class="bar lv${i+1}" style="height:${Math.max(3,n/mx*30)}px"></div><span>${i+1}部</span></div>`).join("")}</div>
   </div>
   ${viewPairs(P)}
   <div class="row"><button class="btn" data-act="allOn">全員チェック</button><button class="btn" data-act="allOff">全員外す</button></div>
-  <div class="alist">${all.map(m=>`<label class="chk ${num[m.id]?"":"off"}">
-    <input type="checkbox" id="att-${m.id}" data-act="toggleAttend" data-id="${m.id}" ${num[m.id]?"checked":""}>
-    <span class="no">${num[m.id]||"–"}</span>${lvChip(m.level)}<span class="nm">${esc(m.name)}</span>${mkChip(P.find(p=>p.id===m.id)?.mk)}</label>`).join("")}</div>
+  <div class="alist">${all.map(m=>`<label class="chk ${att.has(m.id)?"":"off"}">
+    <input type="checkbox" id="att-${m.id}" data-act="toggleAttend" data-id="${m.id}" ${att.has(m.id)?"checked":""}>
+    <span class="no">${num[m.id]||"–"}</span>${lvChip(m.level)}<span class="nm">${esc(m.name)}</span>${W.has(m.id)?'<span class="ngmark" style="background:var(--cork-soft);color:var(--cork)">遅刻</span>':mkChip(P.find(p=>p.id===m.id)?.mk)}</label>`).join("")}</div>
   </section>`;
 }
 function viewPairs(P){
@@ -673,8 +687,8 @@ function viewPairs(P){
   return `<div class="box" style="display:grid;gap:10px">
     <div><h3>大会ペア（今日だけ）</h3><p class="note">大会が近いペアを登録すると、その日は1ペアにつき${S.cfg.pairGames}回、2人を味方にした試合を入れます。ペアごとに別のマークが付きます。</p></div>
     ${S.tp.map((p,i)=>{const A=byId(p.a),B=byId(p.b);if(!A||!B)return"";
-      const on=S.attend.includes(p.a)&&S.attend.includes(p.b);
-      return `<div class="tpitem">${mkChip(p.k)}<span class="nm">${esc(A.name)} ・ ${esc(B.name)}${on?"":' <span class="note">（どちらか欠席のため今日は対象外）</span>'}</span><button class="x" data-act="delTp" data-i="${i}" aria-label="大会ペアを解除">×</button></div>`}).join("")}
+      const hs=new Set(here()), on=hs.has(p.a)&&hs.has(p.b);
+      return `<div class="tpitem">${mkChip(p.k)}<span class="nm">${esc(A.name)} ・ ${esc(B.name)}${on?"":' <span class="note">（どちらかが欠席か到着待ちのため、今は対象外）</span>'}</span><button class="x" data-act="delTp" data-i="${i}" aria-label="大会ペアを解除">×</button></div>`}).join("")}
     ${nextK===undefined||free.length<2?"":`<div class="row">
       <select id="tpA" style="flex:1;min-width:130px">${opts}</select>
       <select id="tpB" style="flex:1;min-width:130px">${free.length>1?opts.replace(`value="${free[1].id}"`,`value="${free[1].id}" selected`):opts}</select>
@@ -700,17 +714,31 @@ function statsStrip(){
     ${schedule.pairs.length?`<div class="stat"><b style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">${schedule.pairs.map((p,j)=>`<span style="display:inline-flex;gap:3px;align-items:center">${mkChip(p.k)}${schedule.pc[j]}</span>`).join("")}</b><span>大会ペアのペア練（回）</span></div>`:""}
   </div>`;
 }
+/* 複数人を選べるプルダウン。何も選んでいないときは「該当なし」 */
+function msel(id, items){
+  return `<details class="msel" id="${id}"><summary><span class="msum">該当なし</span></summary><div class="mlist2">${
+    items.length ? items.map(it=>`<label class="mopt"><input type="checkbox" value="${it.id}" data-msel="${id}" data-name="${esc(it.name)}"><span>${it.label}</span></label>`).join("")
+    : '<p class="note">対象の人はいません</p>'}</div></details>`;
+}
+function mselValues(id){ return [...document.querySelectorAll(`[data-msel="${id}"]:checked`)].map(x=>+x.value); }
 function viewLate(P){
-  const done=S.day?.done||0, R=schedule.rounds.length;
+  const done=S.day?.done||0, R=schedule.rounds.length, W=waitSet();
+  const waiting=S.wait.map(byId).filter(Boolean);
   const out=S.members.filter(m=>!S.attend.includes(m.id)).sort((a,b)=>a.id-b.id);
-  return `<div class="box admin" style="display:grid;gap:10px">
+  const pl=p=>({id:p.id,name:p.name,label:`<span class="no">${p.num}</span> ${esc(p.name)}`});
+  return `<div class="box admin" style="display:grid;gap:12px">
     <div><h3>遅刻・早退</h3><p class="note">${done
       ? `第${done}ラウンドまで終了。終わったラウンドはそのままにして、第${done+1}ラウンドから組み直します。`
       : "まだどのラウンドも終わっていないので、全体を組み直します。ラウンドが終わったら「終了」を押してください。"}</p></div>
-    ${out.length?`<div class="row"><select id="lateIn" style="flex:1;min-width:150px"><option value="">該当なし</option>${out.map(m=>`<option value="${m.id}">${esc(m.name)}</option>`).join("")}</select>
-      <button class="btn" data-act="lateIn">来た（遅刻）</button></div>`:""}
-    ${P.length?`<div class="row"><select id="earlyOut" style="flex:1;min-width:150px"><option value="">該当なし</option>${P.map(p=>`<option value="${p.id}">${p.num} ${esc(p.name)}</option>`).join("")}</select>
-      <button class="btn" data-act="earlyOut">帰った（早退）</button></div>`:""}
+    <div style="display:grid;gap:6px"><span class="note">遅刻する人（今日の参加者から選ぶ。来るまで試合に入りません）</span>
+      <div class="row">${msel("mLate",P.map(pl))}<button class="btn" data-act="lateMark">遅刻にする</button></div></div>
+    ${waiting.length?`<div class="row" style="gap:6px"><span class="note">到着待ち：</span>${waiting.map(m=>`<span class="ngmark" style="background:var(--cork-soft);color:var(--cork)">${esc(m.name)}</span>`).join("")}</div>`:""}
+    <div style="display:grid;gap:6px"><span class="note">来た人（到着待ちの人と、参加予定でなかった人から選ぶ）</span>
+      <div class="row">${msel("mIn",[...waiting.map(m=>({id:m.id,name:m.name,label:`${esc(m.name)} <span class="note">（遅刻）</span>`})),
+        ...out.map(m=>({id:m.id,name:m.name,label:`${esc(m.name)} <span class="note">（予定なし）</span>`}))])}<button class="btn" data-act="lateIn">来た</button></div></div>
+    <div style="display:grid;gap:6px"><span class="note">早退する人</span>
+      <div class="row">${msel("mOut",P.map(pl))}<button class="btn" data-act="earlyOut">帰った（早退）</button></div></div>
+    <p class="note">到着待ちの人が来なくなったときは、「今日の参加者」でチェックを外してください。</p>
     ${done?`<div class="row"><button class="btn" data-act="resetDay">進行をリセット（最初から組み直す）</button></div>`:""}
     ${done&&done>=R?'<p class="note">全ラウンドが終わりました。</p>':""}
   </div>`;
@@ -787,7 +815,7 @@ document.addEventListener("click",e=>{
   const a=e.target.closest("[data-act]"); if(!a) return;
   const id=+a.dataset.id, act=a.dataset.act;
   if(act==="setLv"){byId(id).level=+a.dataset.lv;changed(true)}
-  if(act==="delMember"){S.members=S.members.filter(m=>m.id!==id);S.attend=S.attend.filter(x=>x!==id);S.ng=S.ng.filter(p=>!p.includes(id));S.tp=S.tp.filter(p=>p.a!==id&&p.b!==id);changed(true)}
+  if(act==="delMember"){S.members=S.members.filter(m=>m.id!==id);S.attend=S.attend.filter(x=>x!==id);S.ng=S.ng.filter(p=>!p.includes(id));S.tp=S.tp.filter(p=>p.a!==id&&p.b!==id);S.wait=(S.wait||[]).filter(x=>x!==id);changed(true)}
   if(act==="addMember"){const n=$("#newName").value.trim();if(!n)return;const nid=S.nextId++;S.members.push({id:nid,name:n,level:+$("#newLv").value});S.attend.push(nid);changed(true)}
   if(act==="addNg"){const x=+$("#ngA").value,y=+$("#ngB").value;if(x===y||isNg(x,y))return;S.ng.push([x,y]);changed(true)}
   if(act==="delNg"){S.ng.splice(+a.dataset.i,1);changed(true)}
@@ -807,8 +835,12 @@ document.addEventListener("click",e=>{
     if(!dy.nums){dy.nums={};schedule.P.forEach(p=>dy.nums[p.id]=p.num)} // 始まったら番号を固定
     dy.done=+a.dataset.i+1;changed(false)}
   if(act==="undoRound"){S.day.done=+a.dataset.i;changed(false)}
-  if(act==="lateIn"){const x=+$("#lateIn").value;if(!x||S.attend.includes(x))return;S.attend.push(x);changed(true)}
-  if(act==="earlyOut"){const x=+$("#earlyOut").value;if(!x)return;S.attend=S.attend.filter(y=>y!==x);changed(true)}
+  if(act==="lateMark"){const xs=mselValues("mLate");if(!xs.length)return;waitSet();
+    S.wait=[...new Set([...S.wait,...xs])];changed(true)}
+  if(act==="lateIn"){const xs=mselValues("mIn");if(!xs.length)return;waitSet();
+    S.wait=S.wait.filter(y=>!xs.includes(y)); xs.forEach(x=>{ if(!S.attend.includes(x)) S.attend.push(x) });changed(true)}
+  if(act==="earlyOut"){const xs=mselValues("mOut");if(!xs.length)return;
+    S.attend=S.attend.filter(y=>!xs.includes(y)); S.wait=(S.wait||[]).filter(y=>!xs.includes(y));changed(true)}
   if(act==="resetDay"){if(!confirm("終わったラウンドの記録を消して、最初から組み直しますか？"))return;S.day=null;changed(true)}
   if(act==="mode"&&cloud.on&&!cloud.admin){tab=tab==="login"?"matches":"login";render();return}
   if(act==="logout"){window.cloudApi?.signOut();return}
@@ -824,7 +856,11 @@ document.addEventListener("click",e=>{
 });
 document.addEventListener("change",e=>{
   if(e.target.dataset.act==="toggleAttend"){const id=+e.target.dataset.id;
-    S.attend=e.target.checked?[...S.attend,id]:S.attend.filter(x=>x!==id);changed(true)}
+    S.attend=e.target.checked?[...S.attend,id]:S.attend.filter(x=>x!==id);
+    if(!e.target.checked) S.wait=(S.wait||[]).filter(x=>x!==id);changed(true)}
+  if(e.target.dataset.msel){const box=document.getElementById(e.target.dataset.msel);
+    const names=[...box.querySelectorAll("input:checked")].map(x=>x.dataset.name);
+    box.querySelector(".msum").textContent=!names.length?"該当なし":names.length<=2?names.join("、"):`${names.slice(0,2).join("、")} ほか${names.length-2}人`;}
   if(e.target.id==="focus"){focusId=e.target.value;render()}
   if(e.target.dataset.act==="rename"){const m=byId(+e.target.dataset.id), n=e.target.value.trim();
     if(!m) return; if(!n){e.target.value=m.name;return}
