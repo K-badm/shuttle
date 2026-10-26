@@ -20,6 +20,8 @@ HTML + CSS + JavaScript でビルド不要。スマホのホーム画面に置�
 - Firestore は入れ子の配列を保存できないので、どちらも `{json: JSON.stringify(...)}` で保存している。
 - メンバー画面では `memberState()` で `public/today` をそのまま S として使い、組み合わせは作り直さない（レベルがないため）。
 - 画面を直したら `sw.js` の `VERSION` を上げる。
+- `config.js` を直したら、`index.html` の `<script src="config.js?v=N">` の数字も上げる（ブラウザに古い控えが残るため）。
+- 公開先：GitHub `K-badm/shuttle` の main ブランチ（GitHub Pages、https://k-badm.github.io/shuttle/）。この Claude のセッションから直接 push できる。
 
 ユーザー（サークルの管理者）は日本語で話す。返答・UIの文言・コメントは日本語で書くこと。
 
