@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>シャトル組み合わせ</title>
+<title>組み合わせ</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -136,7 +136,7 @@ body.user .match.cross{border-color:var(--line);box-shadow:none}
 .match.dim{opacity:.3}
 .mh{display:flex;gap:8px;align-items:center;padding:6px 12px;border-bottom:1px dashed var(--line);font-size:12px;color:var(--muted)}
 .mh .mno{font-family:var(--f-mono);font-weight:600;color:var(--fg)}
-.tag{margin-left:auto;font-size:11px;font-weight:700;padding:1px 7px;border-radius:999px;background:var(--cork-soft);color:var(--cork)}
+.tag{margin-left:auto;white-space:nowrap;flex:none;font-size:11px;font-weight:700;padding:1px 7px;border-radius:999px;background:var(--cork-soft);color:var(--cork)}
 .tag+.tag{margin-left:4px}
 .tag.bad{background:var(--warn-soft);color:var(--warn)}
 .teams{display:grid;grid-template-columns:1fr auto 1fr;align-items:stretch}
@@ -176,7 +176,7 @@ body:not(.owner) .owner{display:none!important}
   <div class="wrap">
     <div class="brand">
       <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="18" r="4" fill="#c98b3c"/><path d="M8.5 16 5 3h14l-3.5 13z" fill="none" stroke="#fff" stroke-width="1.6" stroke-linejoin="round"/><path d="M9 3l1.5 12M15 3l-1.5 12M12 3v12" stroke="#fff" stroke-width="1.2"/></svg>
-      シャトル組み合わせ
+      組み合わせ
     </div>
     <div class="date" id="today"></div>
     <button class="modebtn" id="modeBtn" data-act="mode" aria-pressed="false">管理者</button>
@@ -707,9 +707,9 @@ function viewLate(P){
     <div><h3>遅刻・早退</h3><p class="note">${done
       ? `第${done}ラウンドまで終了。終わったラウンドはそのままにして、第${done+1}ラウンドから組み直します。`
       : "まだどのラウンドも終わっていないので、全体を組み直します。ラウンドが終わったら「終了」を押してください。"}</p></div>
-    ${out.length?`<div class="row"><select id="lateIn" style="flex:1;min-width:150px">${out.map(m=>`<option value="${m.id}">${esc(m.name)}</option>`).join("")}</select>
+    ${out.length?`<div class="row"><select id="lateIn" style="flex:1;min-width:150px"><option value="">該当なし</option>${out.map(m=>`<option value="${m.id}">${esc(m.name)}</option>`).join("")}</select>
       <button class="btn" data-act="lateIn">来た（遅刻）</button></div>`:""}
-    ${P.length?`<div class="row"><select id="earlyOut" style="flex:1;min-width:150px">${P.map(p=>`<option value="${p.id}">${p.num} ${esc(p.name)}</option>`).join("")}</select>
+    ${P.length?`<div class="row"><select id="earlyOut" style="flex:1;min-width:150px"><option value="">該当なし</option>${P.map(p=>`<option value="${p.id}">${p.num} ${esc(p.name)}</option>`).join("")}</select>
       <button class="btn" data-act="earlyOut">帰った（早退）</button></div>`:""}
     ${done?`<div class="row"><button class="btn" data-act="resetDay">進行をリセット（最初から組み直す）</button></div>`:""}
     ${done&&done>=R?'<p class="note">全ラウンドが終わりました。</p>':""}

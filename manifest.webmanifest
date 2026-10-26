@@ -1,6 +1,6 @@
 {
-  "name": "シャトル組み合わせ",
-  "short_name": "シャトル",
+  "name": "組み合わせ",
+  "short_name": "組み合わせ",
   "description": "バドミントンサークルのダブルスの組み合わせを作るアプリ",
   "lang": "ja",
   "start_url": "./",
