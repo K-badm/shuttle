@@ -137,6 +137,7 @@ body.user .match.cross{border-color:var(--line);box-shadow:none}
 .mh{display:flex;gap:8px;align-items:center;padding:6px 12px;border-bottom:1px dashed var(--line);font-size:12px;color:var(--muted)}
 .mh .mno{font-family:var(--f-mono);font-weight:600;color:var(--fg)}
 .tag{margin-left:auto;font-size:11px;font-weight:700;padding:1px 7px;border-radius:999px;background:var(--cork-soft);color:var(--cork)}
+.tag+.tag{margin-left:4px}
 .tag.bad{background:var(--warn-soft);color:var(--warn)}
 .teams{display:grid;grid-template-columns:1fr auto 1fr;align-items:stretch}
 .team{display:grid;gap:4px;padding:8px 10px;min-width:0}
@@ -240,6 +241,8 @@ const esc = s => String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&g
 const byId = id => S.members.find(m=>m.id===id);
 const isNg = (a,b) => S.ng.some(([x,y])=>(x===a&&y===b)||(x===b&&y===a));
 const lvChip = l => `<span class="lv lv${l}" title="${l}部">${l}部</span>`;
+/* 部の差が3以上の人（味方でも相手でも）が同じ試合にいれば、交流戦として数える（ユーザーの指定） */
+const wideGame = ps => Math.max(...ps.map(p=>p.level)) - Math.min(...ps.map(p=>p.level)) >= 3;
 const MARKS = ["A","B","C","D","E","F"];
 const mkChip = k => k==null ? "" : `<span class="mk mk${k%6}" title="大会ペア${MARKS[k%6]}">${MARKS[k%6]}</span>`;
 
@@ -368,9 +371,10 @@ function buildOnce(P, cfg, pairs, fixed=[], off={}){
         if(isNg(best[x].id,best[y].id)) bad.push([best[x],best[y]]);
       }
       ng+=bad.length;
-      if(cross) crossDone++;
-      for(const p of best){cnt[p.id]++;last[p.id]=r;used.add(p.id);if(cross)xc[p.id]++}
-      games.push({no:i+1,court:c,cross,teams:pair,bad,pm});
+      const isX = cross || wideGame(best); // 交流戦の枠、または部の差が3以上の人がいる試合
+      if(isX) crossDone++;
+      for(const p of best){cnt[p.id]++;last[p.id]=r;used.add(p.id);if(isX)xc[p.id]++}
+      games.push({no:i+1,court:c,cross:isX,teams:pair,bad,pm});
       gi++;
     }
     if(!games.length) break;
@@ -391,6 +395,7 @@ function buildOnce(P, cfg, pairs, fixed=[], off={}){
       for(const l of rd.rest){ if(!lows.includes(l.id) || ac(h.id)-ac(l.id)<=1) continue;
         if(g.cross && cls(l)!==cls(h)) continue;
         const others=g.teams.flat().filter(p=>p.id!==h.id);
+        if(!g.cross && wideGame([...others,l])) continue; // 入れ替えで交流戦が増えないように
         if(others.some(o=>isNg(o.id,l.id))) continue;
         const v=Math.abs(l.level-h.level)+Math.random()*0.1;
         if(v<bs){bs=v;bestSw={rd,g,t,s,h,l}}
@@ -420,7 +425,7 @@ function hydrate(rounds,P){
   return rounds.map(rd=>({rest:rd.rest.map(get),games:rd.games.map(g=>{
     const teams=g.teams.map(t=>t.map(get)), ps=teams.flat(), bad=[];
     for(let x=0;x<4;x++)for(let y=x+1;y<4;y++) if(isNg(ps[x].id,ps[y].id)) bad.push([ps[x],ps[y]]);
-    return {...g,teams,bad};
+    return {...g,teams,bad,cross:!!g.cross||wideGame(ps)};
   })}));
 }
 /* 実際の出場回数などを数える（早退した人も含む） */
@@ -729,7 +734,7 @@ function viewMatches(){
     P.length<4&&!schedule.rounds.length?'<p class="note">参加者が4人以上いると組み合わせを作れます。</p>':statsStrip()+`
   <div class="row"><label for="focus" class="note">選手を強調</label>
     <select id="focus" style="flex:1;max-width:260px"><option value="">（なし）</option>${P.map(p=>`<option value="${p.id}" ${String(p.id)===focusId?"selected":""}>${p.num} ${esc(p.name)}</option>`).join("")}</select>
-    <span class="legend"><span class="it admin"><span class="tag">交流戦</span>強い人と弱い人が混ざる試合</span><span class="it"><span class="tag pr">ペア練</span>大会ペアが味方で出る試合</span></span></div>
+    <span class="legend"><span class="it admin"><span class="tag">交流戦</span>1・2部と4・5部を混ぜた試合、または部の差が3以上の人（味方・相手とも）がいる試合</span><span class="it"><span class="tag pr">ペア練</span>大会ペアが味方で出る試合</span></span></div>
   ${schedule.rounds.map((r,ri)=>`<div class="round ${ri<done?"done":""}">
     <div class="rhead"><span class="rn">第${ri+1}ラウンド</span>
       ${ri<done?'<span class="tag ok">終了</span>':""}
@@ -741,7 +746,7 @@ function viewMatches(){
       const sum=t=>t[0].level+t[1].level;
       return `<div class="match ${g.cross?"cross":""} ${focusId&&!has?"dim":""}">
         <div class="mh"><span class="mno">第${g.no}試合</span><span>${courtName(g.court)}</span>
-        ${g.bad.length?'<span class="tag bad admin">NG同席</span>':""}${g.pm.length?`<span class="tag pr">ペア練 ${g.pm.map(mkChip).join("")}</span>`:g.cross?'<span class="tag admin">交流戦</span>':""}</div>
+        ${g.bad.length?'<span class="tag bad admin">NG同席</span>':""}${g.cross?'<span class="tag admin">交流戦</span>':""}${g.pm.length?`<span class="tag pr">ペア練 ${g.pm.map(mkChip).join("")}</span>`:""}</div>
         <div class="teams">
           <div class="team">${g.teams[0].map(pl).join("")}<span class="tsum">部の合計 ${sum(g.teams[0])}</span></div>
           <div class="net" aria-hidden="true"></div>
@@ -769,7 +774,7 @@ function viewSummary(){
       const mine=games.filter(g=>g.teams.flat().some(q=>q.id===p.id));
       const pips=[...Array(R)].map((_,ri)=>{const g=mine.find(x=>x.ri===ri);return `<span class="pip ${g?(g.cross?"x":"on"):""}"></span>`}).join("");
       return `<tr class="click" data-act="focusP" data-id="${p.id}" tabindex="0"><td class="n">${p.num}</td><td>${esc(p.name)}${st(p)}</td><td class="admin">${lvChip(p.level)}</td>
-      <td class="n">${schedule.cnt[p.id]||0}</td><td class="n admin">${p.level===3?"–":(schedule.xc[p.id]||0)}</td><td class="n">${p.mk==null?"–":mkChip(p.mk)+" "+(schedule.ppc[p.id]||0)}</td><td><div class="pips">${pips}</div></td></tr>`}).join("")}</tbody>
+      <td class="n">${schedule.cnt[p.id]||0}</td><td class="n admin">${schedule.xc[p.id]||0}</td><td class="n">${p.mk==null?"–":mkChip(p.mk)+" "+(schedule.ppc[p.id]||0)}</td><td><div class="pips">${pips}</div></td></tr>`}).join("")}</tbody>
   </table></div>
   </section>`;
 }
