@@ -214,9 +214,13 @@ if(S.v!==2){ S.v=2; S.cfg.courts=2; S.tp=[{a:2,b:5,k:0},{a:14,b:16,k:1}]; S.cfg.
    メンバー：public/today だけを読む。レベル・NGペア・交流戦の印はそもそも送らない。 */
 const FB = window.SHUTTLE_FIREBASE || null;
 const cloud = {on:!!FB, admin:false, owner:false, ready:false, err:"", email:"", admins:[], denied:""};
+/* 共有の設定（config.js）がないままネットに公開されたページでは、管理者画面を開けないようにする。
+   自分のパソコンで開いたとき（file:// や localhost）だけ、ログインなしのお試し管理者画面が使える。 */
+const LOCKED = !FB && /^https?:$/.test(location.protocol) && !/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
+const memberOnly = () => (cloud.on && !cloud.admin) || LOCKED;
 const LOCAL = S; // この端末に保存してある分（管理者が初めてログインしたときに送る）
 function save(){
-  if(cloud.on && !cloud.admin) return; // メンバー用の表示データは保存しない
+  if(memberOnly()) return; // メンバー用の表示データは保存しない
   try{ localStorage.setItem("shuttle-v1", JSON.stringify(S)) }catch(e){}
   if(cloud.admin) queuePush();
 }
@@ -229,7 +233,7 @@ if(S.day && S.day.date!==TODAY) S.day=null;
 let tab = "matches", schedule = null, stale = false, focusId = "", mode = "admin";
 try{ mode = localStorage.getItem("shuttle-mode") || "admin" }catch(e){}
 try{ tab = localStorage.getItem("shuttle-tab") || "matches" }catch(e){}
-if(cloud.on){ S = memberState(null); mode = "user"; tab = "matches"; } // ログインが確かめられるまではメンバー画面
+if(cloud.on || LOCKED){ S = memberState(null); mode = "user"; tab = "matches"; } // ログインが確かめられるまではメンバー画面
 const $ = s => document.querySelector(s);
 const esc = s => String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const byId = id => S.members.find(m=>m.id===id);
@@ -456,7 +460,7 @@ function generate(){
 /* 保存してある組み合わせを読み込む。なければ作る */
 function ensure(){
   if(schedule && !stale) return;
-  if(cloud.on && !cloud.admin && !S.day?.rounds.length){ // メンバー画面ではここで組まない
+  if(memberOnly() && !S.day?.rounds.length){ // メンバー画面ではここで組まない
     schedule={rounds:[],cnt:{},xc:{},ng:0,pc:[],ppc:{},P:players(),pairs:[]}; return;
   }
   if(stale || !S.day || !S.day.rounds.length) return generate();
@@ -497,7 +501,8 @@ async function pushNow(){
 }
 function showStatus(){
   const el=$("#status"); if(!el) return;
-  el.textContent = !cloud.on ? "データはこの端末のブラウザにだけ保存されます。"
+  el.textContent = LOCKED ? "共有の設定（config.js）がまだ入っていないため、組み合わせは表示されません。管理者の方は SETUP.md の手順で設定してください。"
+    : !cloud.on ? "データはこの端末のブラウザにだけ保存されます。"
     : cloud.err ? "共有サーバーにつながりません："+cloud.err
     : cloud.admin ? (pushMsg||((cloud.owner?"オーナー":"管理者")+"としてログイン中（"+cloud.email+"）。変更はメンバーの画面にも出ます。"))
     : cloud.ready ? "管理者が組み合わせを変えると、自動で更新されます。" : "読み込み中…";
@@ -576,7 +581,7 @@ function viewShare(){
 
 /* ---------- 描画 ---------- */
 function render(){
-  if(cloud.on && !cloud.admin) mode="user";
+  if(memberOnly()) mode="user";
   const user=mode==="user";
   document.body.classList.toggle("user",user);
   document.body.classList.toggle("owner",cloud.on && cloud.owner);
@@ -584,6 +589,7 @@ function render(){
   const mb=$("#modeBtn"); mb.textContent=user?"メンバー画面":"管理者画面"; mb.setAttribute("aria-pressed",String(!user));
   mb.title=user?"タップで管理者画面に切り替え":"タップでメンバー画面に切り替え";
   if(cloud.on && !cloud.admin){ mb.textContent="管理者ログイン"; mb.title="管理者はここからログイン"; }
+  mb.hidden = LOCKED;
   if(tab==="login" && (!cloud.on || cloud.admin)) tab="matches";
   if(user&&(tab==="members"||tab==="attend")) tab="matches";
   document.querySelectorAll("nav.tabs button").forEach(b=>b.setAttribute("aria-selected",b.dataset.tab===tab));
@@ -803,6 +809,7 @@ document.addEventListener("click",e=>{
     inp.value=""; window.cloudApi?.addAdmin(v).then(()=>{const m2=$("#adminMsg"); if(m2) m2.textContent=v+" を管理者にしました。"},err=>{const m2=$("#adminMsg"); if(m2) m2.textContent="追加できませんでした（"+(err.code||err.message)+"）"}); return}
   if(act==="delAdmin"){const v=a.dataset.email; window.cloudApi?.removeAdmin(v).catch(err=>{const m2=$("#adminMsg"); if(m2) m2.textContent="外せませんでした（"+(err.code||err.message)+"）"}); return}
   if(act==="copyUrl"){navigator.clipboard?.writeText(a.dataset.url).then(()=>{a.textContent="コピーしました"},()=>{});return}
+  if(act==="mode"&&LOCKED) return;
   if(act==="mode"){mode=mode==="user"?"admin":"user";try{localStorage.setItem("shuttle-mode",mode)}catch(_){}render();return}
   if(act==="focusP"){focusId=String(id);tab="matches";render();window.scrollTo(0,0)}
 });

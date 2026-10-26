@@ -1,0 +1,42 @@
+rules_version = '2';
+
+// 権限の設計
+//   オーナー : OWNER のメールアドレスの人（1人）。管理者の追加・削除ができる。
+//   管理者   : admins/{メールアドレス} に登録された人。メンバー・レベル・組み合わせを編集できる。
+//   メンバー : ログイン不要。public/today（レベル・NGペアなし）だけ読める。
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ↓ config.js の ownerEmail と同じアドレスを、小文字で書く
+    function ownerEmail() { return "kxmz7826@gmail.com".lower(); }
+
+    function myEmail() {
+      return request.auth != null && request.auth.token.email != null
+        ? request.auth.token.email.lower() : "";
+    }
+    function isOwner() { return myEmail() != "" && myEmail() == ownerEmail(); }
+    function isAdmin() {
+      return isOwner()
+        || (myEmail() != "" && exists(/databases/$(database)/documents/admins/$(myEmail())));
+    }
+
+    // メンバーが見る組み合わせ（レベルやNGペアは入っていない）。誰でも読める
+    match /public/{doc} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    // メンバーとレベル、NGペアなど。管理者だけ
+    match /private/{doc} {
+      allow read, write: if isAdmin();
+    }
+    // 管理者の名簿。本人は自分の行だけ確かめられる。変更はオーナーだけ
+    match /admins/{email} {
+      allow read: if isAdmin() || email == myEmail();
+      allow write: if isOwner();
+    }
+    // それ以外はすべて禁止
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
