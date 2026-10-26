@@ -71,7 +71,7 @@ button.btn:hover{filter:brightness(1.05)}
 button:focus-visible,input:focus-visible,select:focus-visible,label.chk:focus-within{outline:2px solid var(--cork);outline-offset:2px}
 button.x{background:none;border:0;color:var(--muted);cursor:pointer;font-size:18px;padding:2px 8px}
 
-.lv{display:inline-grid;place-items:center;width:22px;height:22px;border-radius:5px;font:600 12px var(--f-mono);flex:none}
+.lv{display:inline-grid;place-items:center;min-width:30px;height:22px;padding:0 5px;border-radius:5px;font:700 12px var(--f-body);flex:none;white-space:nowrap}
 .lv1{background:var(--lv1);color:var(--lvf1)}.lv2{background:var(--lv2);color:var(--lvf2)}.lv3{background:var(--lv3);color:var(--lvf3)}.lv4{background:var(--lv4);color:var(--lvf4)}.lv5{background:var(--lv5);color:var(--lvf5);box-shadow:inset 0 0 0 1px var(--line)}
 .mk{display:inline-grid;place-items:center;min-width:20px;height:20px;padding:0 4px;border-radius:999px;font:800 11px var(--f-display);color:var(--mk-ink);flex:none}
 .mk0{background:var(--m0)}.mk1{background:var(--m1)}.mk2{background:var(--m2)}.mk3{background:var(--m3)}.mk4{background:var(--m4)}.mk5{background:var(--m5)}
@@ -82,14 +82,15 @@ button.x{background:none;border:0;color:var(--muted);cursor:pointer;font-size:18
 
 /* members */
 .mlist{display:grid;gap:0}
-.mrow{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--line)}
+.mrow{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--line);flex-wrap:wrap}
 .mrow:last-child{border-bottom:0}
 .mrow .nm{flex:1;min-width:0;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .mrow input.nm{font:500 15px var(--f-body);background:transparent;border-color:transparent;padding:4px 8px;margin-left:-8px}
 .mrow input.nm:hover{border-color:var(--line)}
 .mrow input.nm:focus{background:var(--bg);border-color:var(--line)}
 .seg{display:flex;border:1px solid var(--line);border-radius:7px;overflow:hidden;flex:none}
-.seg button{border:0;background:var(--surface);color:var(--muted);font:600 13px var(--f-mono);width:30px;height:28px;cursor:pointer;border-left:1px solid var(--line)}
+@media (max-width:520px){.mrow .nm{flex-basis:50%}.mrow .seg{order:5;margin-left:40px}.mrow .x{order:4}}
+.seg button{border:0;background:var(--surface);color:var(--muted);font:600 13px var(--f-body);width:38px;height:28px;cursor:pointer;border-left:1px solid var(--line);white-space:nowrap}
 .seg button:first-child{border-left:0}
 .seg button.on{background:var(--court);color:var(--court-ink)}
 .ngmark{color:var(--warn);font-size:12px;font-weight:700;background:var(--warn-soft);padding:1px 6px;border-radius:4px;flex:none}
@@ -238,7 +239,7 @@ const $ = s => document.querySelector(s);
 const esc = s => String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const byId = id => S.members.find(m=>m.id===id);
 const isNg = (a,b) => S.ng.some(([x,y])=>(x===a&&y===b)||(x===b&&y===a));
-const lvChip = l => `<span class="lv lv${l}" title="レベル${l}">${l}</span>`;
+const lvChip = l => `<span class="lv lv${l}" title="${l}部">${l}部</span>`;
 const MARKS = ["A","B","C","D","E","F"];
 const mkChip = k => k==null ? "" : `<span class="mk mk${k%6}" title="大会ペア${MARKS[k%6]}">${MARKS[k%6]}</span>`;
 
@@ -547,7 +548,7 @@ document.addEventListener("focusout",()=>{ if(cloud.pendingRender){ cloud.pendin
 function cloudAdmins(list){ cloud.admins=list; if(tab==="admins") render(); }
 function viewAdmins(){
   return `<section class="panel">
-  <div><h2>管理者</h2><p class="note">ここに登録したメールアドレスの人だけが、管理者画面（レベル・NGペア・参加者・組み合わせの編集）に入れます。管理者の追加・削除と、アプリ自体の変更はオーナーだけができます。</p></div>
+  <div><h2>管理者</h2><p class="note">ここに登録したメールアドレスの人だけが、管理者画面（部・NGペア・参加者・組み合わせの編集）に入れます。管理者の追加・削除と、アプリ自体の変更はオーナーだけができます。</p></div>
   <div class="box" style="display:grid;gap:8px">
     <div class="aitem"><span class="rolechip">オーナー</span><span class="em">${esc(cloud.email)}</span></div>
     ${cloud.admins.map(e=>`<div class="aitem"><span class="rolechip" style="background:var(--lv2)">管理者</span><span class="em">${esc(e)}</span><button class="x" data-act="delAdmin" data-email="${esc(e)}" aria-label="${esc(e)}を管理者から外す">×</button></div>`).join("")}
@@ -563,7 +564,7 @@ function viewAdmins(){
 }
 function viewLogin(){
   return `<section class="panel">
-  <div><h2>管理者ログイン</h2><p class="note">オーナーに登録された管理者だけがログインできます。ログインすると、メンバーやレベルの編集と、組み合わせ作りができます。</p></div>
+  <div><h2>管理者ログイン</h2><p class="note">オーナーに登録された管理者だけがログインできます。ログインすると、メンバーや部の編集と、組み合わせ作りができます。</p></div>
   ${cloud.denied?`<p class="note" style="color:var(--warn)">${esc(cloud.denied)} は管理者として登録されていません。オーナーに登録を頼んでください。</p>`:""}
   <form class="box" id="loginForm" style="display:grid;gap:10px;max-width:420px">
     <label class="note" for="loginEmail">メールアドレス</label>
@@ -576,7 +577,7 @@ function viewLogin(){
 function viewShare(){
   const url=location.href.split(/[?#]/)[0].replace(/index\.html$/,"");
   return `<div class="box admin" style="display:grid;gap:8px">
-    <div><h3>メンバーと共有中</h3><p class="note">このURLをメンバーに送ってください。メンバーの画面では、レベル・NGペア・交流戦の印は出ません（データ自体を送っていません）。</p></div>
+    <div><h3>メンバーと共有中</h3><p class="note">このURLをメンバーに送ってください。メンバーの画面では、部・NGペア・交流戦の印は出ません（データ自体を送っていません）。</p></div>
     <div class="row"><input type="text" readonly value="${esc(url)}" style="flex:1;min-width:180px;font-family:var(--f-mono);font-size:13px" aria-label="メンバー用URL">
       <button class="btn" data-act="copyUrl" data-url="${esc(url)}">URLをコピー</button>
       <button class="btn" data-act="logout">ログアウト</button></div>
@@ -609,13 +610,13 @@ function render(){
 function viewMembers(){
   const ngIds=new Set(S.ng.flat());
   const sorted=[...S.members].sort((a,b)=>a.level-b.level||a.id-b.id);
-  const opts=sorted.map(m=>`<option value="${m.id}">${esc(m.name)}（Lv${m.level}）</option>`).join("");
+  const opts=sorted.map(m=>`<option value="${m.id}">${esc(m.name)}（${m.level}部）</option>`).join("");
   return `<section class="panel">
-  <div><h2>メンバーとレベル</h2><p class="note">管理者だけが見る画面の想定です。1が強い、5が弱い。名前はタップすると直せます。</p></div>
+  <div><h2>メンバーと部</h2><p class="note">管理者だけが見る画面の想定です。1部が強く、5部が弱い。名前はタップすると直せます。</p></div>
   <div class="box">
     <div class="row">
       <input type="text" id="newName" placeholder="名前を追加" style="flex:1;min-width:140px">
-      <select id="newLv">${[1,2,3,4,5].map(l=>`<option value="${l}" ${l===3?"selected":""}>Lv${l}</option>`).join("")}</select>
+      <select id="newLv">${[1,2,3,4,5].map(l=>`<option value="${l}" ${l===3?"selected":""}>${l}部</option>`).join("")}</select>
       <button class="btn primary" data-act="addMember">追加</button>
     </div>
   </div>
@@ -623,8 +624,8 @@ function viewMembers(){
     ${sorted.map(m=>`<div class="mrow">
       ${lvChip(m.level)}<input type="text" class="nm" data-act="rename" data-id="${m.id}" value="${esc(m.name)}" aria-label="${esc(m.name)}の名前" title="タップして名前を直せます">
       ${ngIds.has(m.id)?'<span class="ngmark" title="NGペアあり">NG</span>':""}
-      <div class="seg" role="group" aria-label="${esc(m.name)}のレベル">
-        ${[1,2,3,4,5].map(l=>`<button class="${m.level===l?"on":""}" data-act="setLv" data-id="${m.id}" data-lv="${l}" aria-pressed="${m.level===l}">${l}</button>`).join("")}
+      <div class="seg" role="group" aria-label="${esc(m.name)}の部">
+        ${[1,2,3,4,5].map(l=>`<button class="${m.level===l?"on":""}" data-act="setLv" data-id="${m.id}" data-lv="${l}" aria-pressed="${m.level===l}">${l}部</button>`).join("")}
       </div>
       <button class="x" data-act="delMember" data-id="${m.id}" aria-label="${esc(m.name)}を削除">×</button>
     </div>`).join("")}
@@ -648,9 +649,9 @@ function viewAttend(){
   const dist=[1,2,3,4,5].map(l=>P.filter(p=>p.level===l).length), mx=Math.max(1,...dist);
   return `<section class="panel">
   <div><h2>今日の参加者 <span class="no" style="font-size:15px">${P.length}人</span></h2>
-  <p class="note">チェックした人に、弱い順（レベル5から）で番号を振ります。番号は当日の呼び出し用です。</p></div>
-  <div class="box"><h3>レベル分布</h3>
-    <div class="dist">${dist.map((n,i)=>`<div class="b"><span>${n}</span><div class="bar lv${i+1}" style="height:${Math.max(3,n/mx*30)}px"></div><span>Lv${i+1}</span></div>`).join("")}</div>
+  <p class="note">チェックした人に、弱い順（5部から）で番号を振ります。番号は当日の呼び出し用です。</p></div>
+  <div class="box"><h3>部ごとの人数</h3>
+    <div class="dist">${dist.map((n,i)=>`<div class="b"><span>${n}</span><div class="bar lv${i+1}" style="height:${Math.max(3,n/mx*30)}px"></div><span>${i+1}部</span></div>`).join("")}</div>
   </div>
   ${viewPairs(P)}
   <div class="row"><button class="btn" data-act="allOn">全員チェック</button><button class="btn" data-act="allOff">全員外す</button></div>
@@ -662,7 +663,7 @@ function viewAttend(){
 function viewPairs(P){
   const inPair=new Set(S.tp.flatMap(p=>[p.a,p.b]));
   const free=P.filter(p=>!inPair.has(p.id));
-  const opts=free.map(p=>`<option value="${p.id}">${p.num} ${esc(p.name)}（Lv${p.level}）</option>`).join("");
+  const opts=free.map(p=>`<option value="${p.id}">${p.num} ${esc(p.name)}（${p.level}部）</option>`).join("");
   const nextK=[0,1,2,3,4,5].find(k=>!S.tp.some(p=>p.k===k));
   return `<div class="box" style="display:grid;gap:10px">
     <div><h3>大会ペア（今日だけ）</h3><p class="note">大会が近いペアを登録すると、その日は1ペアにつき${S.cfg.pairGames}回、2人を味方にした試合を入れます。ペアごとに別のマークが付きます。</p></div>
@@ -689,7 +690,7 @@ function statsStrip(){
   return `<div class="stats">
     <div class="stat"><b>${schedule.rounds.reduce((s,r)=>s+r.games.length,0)}</b><span>試合</span></div>
     <div class="stat ${mx-mn<=1?"good":""}"><b>${mn===mx?mn:mn+"〜"+mx}</b><span>1人あたり試合数${Object.keys(joined).length?"（遅刻者は1回少ないことがあります）":""}</span></div>
-    <div class="stat admin"><b>${xa.toFixed(1)}</b><span>交流戦/人（Lv1・2と4・5）</span></div>
+    <div class="stat admin"><b>${xa.toFixed(1)}</b><span>交流戦/人（1・2部と4・5部）</span></div>
     <div class="stat admin ${schedule.ng?"bad":"good"}"><b>${schedule.ng}</b><span>NGペアの同席</span></div>
     ${schedule.pairs.length?`<div class="stat"><b style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">${schedule.pairs.map((p,j)=>`<span style="display:inline-flex;gap:3px;align-items:center">${mkChip(p.k)}${schedule.pc[j]}</span>`).join("")}</b><span>大会ペアのペア練（回）</span></div>`:""}
   </div>`;
@@ -742,9 +743,9 @@ function viewMatches(){
         <div class="mh"><span class="mno">第${g.no}試合</span><span>${courtName(g.court)}</span>
         ${g.bad.length?'<span class="tag bad admin">NG同席</span>':""}${g.pm.length?`<span class="tag pr">ペア練 ${g.pm.map(mkChip).join("")}</span>`:g.cross?'<span class="tag admin">交流戦</span>':""}</div>
         <div class="teams">
-          <div class="team">${g.teams[0].map(pl).join("")}<span class="tsum">Lv計 ${sum(g.teams[0])}</span></div>
+          <div class="team">${g.teams[0].map(pl).join("")}<span class="tsum">部の合計 ${sum(g.teams[0])}</span></div>
           <div class="net" aria-hidden="true"></div>
-          <div class="team">${g.teams[1].map(pl).join("")}<span class="tsum">Lv計 ${sum(g.teams[1])}</span></div>
+          <div class="team">${g.teams[1].map(pl).join("")}<span class="tsum">部の合計 ${sum(g.teams[1])}</span></div>
         </div></div>`}).join("")}</div>
   </div>`).join("")}`}
   </section>`;
@@ -763,7 +764,7 @@ function viewSummary(){
   <div><h2>集計</h2><p class="note">行をタップすると、組み合わせ画面でその人の試合を強調します。マス目は各ラウンドの出場<span class="admin">（橙は交流戦）</span>。</p></div>
   ${schedule.P.length<4&&!games.length?"":statsStrip()}
   <div class="tablewrap"><table>
-    <thead><tr><th>番号</th><th>名前</th><th class="admin">Lv</th><th style="text-align:right">試合</th><th class="admin" style="text-align:right">交流戦</th><th style="text-align:right">ペア練</th><th>ラウンド別</th></tr></thead>
+    <thead><tr><th>番号</th><th>名前</th><th class="admin">部</th><th style="text-align:right">試合</th><th class="admin" style="text-align:right">交流戦</th><th style="text-align:right">ペア練</th><th>ラウンド別</th></tr></thead>
     <tbody>${P.map(p=>{
       const mine=games.filter(g=>g.teams.flat().some(q=>q.id===p.id));
       const pips=[...Array(R)].map((_,ri)=>{const g=mine.find(x=>x.ri===ri);return `<span class="pip ${g?(g.cross?"x":"on"):""}"></span>`}).join("");
