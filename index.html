@@ -134,6 +134,18 @@ label.chk .nm{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflo
 .match.cross{border-color:var(--cork);box-shadow:inset 4px 0 0 var(--cork)}
 body.user .match.cross{border-color:var(--line);box-shadow:none}
 .match.dim{opacity:.3}
+/* 手で入れ替えられる名前 */
+.drag{cursor:grab;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;border-radius:6px;transition:background .1s}
+.p.drag{margin:-2px -4px;padding:2px 4px}
+.drag:hover{background:var(--cork-soft)}
+.drag.dragging{opacity:.35}
+.drag.drop{outline:2px dashed var(--cork);outline-offset:1px;background:var(--cork-soft)}
+.drag.picked{outline:2px solid var(--court);outline-offset:1px;background:var(--cork-soft)}
+.ghost{position:fixed;z-index:40;pointer-events:none;display:flex;gap:6px;align-items:center;font-size:14px;padding:4px 8px;border-radius:8px;background:var(--surface);border:2px solid var(--cork);box-shadow:0 8px 24px rgba(0,0,0,.25)}
+.restchips{display:flex;flex-wrap:wrap;gap:4px}
+.rchip .no{min-width:0}
+body.nosel{-webkit-user-select:none;user-select:none}
+.rchip{display:inline-flex;gap:4px;align-items:center;font-size:12px;padding:2px 8px;border:1px solid var(--line);border-radius:999px;background:var(--surface)}
 /* 始まった試合はグレーにする（管理者が「開始」を押した順） */
 .match.started{background:var(--bg);filter:grayscale(1);opacity:.55}
 .match.started.dim{opacity:.25}
@@ -268,6 +280,7 @@ const lvChip = l => `<span class="lv lv${l}" title="${l}部">${l}部</span>`;
 /* 部の差が3以上の人（味方でも相手でも）が同じ試合にいれば、交流戦として数える（ユーザーの指定） */
 const wideGame = ps => Math.max(...ps.map(p=>p.level)) - Math.min(...ps.map(p=>p.level)) >= 3;
 const MARKS = ["A","B","C","D","E","F"];
+const MAX_MEMBERS = 27; // 登録できるメンバーの上限（ユーザーの指定）
 const mkChip = k => k==null ? "" : `<span class="mk mk${k%6}" title="大会ペア${MARKS[k%6]}">${MARKS[k%6]}</span>`;
 
 /* 到着待ち（今日の参加者だが、遅刻でまだ来ていない人）。日付が変わったら空にする */
@@ -663,13 +676,13 @@ function viewMembers(){
   const sorted=[...S.members].sort((a,b)=>a.level-b.level||a.id-b.id);
   const opts=sorted.map(m=>`<option value="${m.id}">${esc(m.name)}（${m.level}部）</option>`).join("");
   return `<section class="panel">
-  <div><h2>メンバーと部</h2><p class="note">管理者だけが見る画面の想定です。1部が強く、5部が弱い。名前はタップすると直せます。</p></div>
+  <div><h2>メンバーと部 <span class="no" style="font-size:15px">${S.members.length}/${MAX_MEMBERS}人</span></h2><p class="note">管理者だけが見る画面の想定です。1部が強く、5部が弱い。名前はタップすると直せます。</p></div>
   <div class="box">
-    <div class="row">
+    ${S.members.length>=MAX_MEMBERS?`<p class="note">登録できるのは${MAX_MEMBERS}人までです。追加するときは、先にほかの人を削除してください。</p>`:`<div class="row">
       <input type="text" id="newName" placeholder="名前を追加" style="flex:1;min-width:140px">
       <select id="newLv">${[1,2,3,4,5].map(l=>`<option value="${l}" ${l===3?"selected":""}>${l}部</option>`).join("")}</select>
       <button class="btn primary" data-act="addMember">追加</button>
-    </div>
+    </div>`}
   </div>
   <div class="box mlist">
     ${sorted.map(m=>`<div class="mrow">
@@ -779,10 +792,13 @@ function viewLate(P){
 function viewMatches(){
   ensure();
   const P=schedule.P, cfg=S.cfg, done=S.day?.done||0;
-  const pl=p=>`<div class="p ${String(p.id)===focusId?"hl":""}"><span class="no">${p.num}</span>${lvChip(p.level)}<span class="nm">${esc(p.name)}</span>${mkChip(p.mk)}</div>`;
   const courtName=c=>String.fromCharCode(65+c)+"コート";
   const started=S.day?.started||0, total=schedule.rounds.reduce((n,r)=>n+r.games.length,0);
   const admin=!document.body.classList.contains("user");
+  // 管理者は、終わっていないラウンドの、まだ始まっていない試合と休みの人を入れ替えられる
+  const canEdit=(ri,g)=>admin && ri>=done && (!g || g.no>started);
+  const sel=dnd.sel;
+  const pl=(p,ri,g,slot)=>`<div class="p ${String(p.id)===focusId?"hl":""} ${canEdit(ri,g)?"drag":""} ${sel===`${ri}|${slot}`?"picked":""}" ${canEdit(ri,g)?`data-slot="${ri}|${slot}"`:""}><span class="no">${p.num}</span>${lvChip(p.level)}<span class="nm">${esc(p.name)}</span>${mkChip(p.mk)}</div>`;
   return `<section class="panel">
   <div class="box admin"><div class="cfg">
     <label for="cfgM">試合数<input type="number" id="cfgM" min="1" max="80" value="${cfg.matches}"></label>
@@ -799,14 +815,16 @@ function viewMatches(){
     <select id="focus" style="flex:1;max-width:260px"><option value="">（なし）</option>${P.map(p=>`<option value="${p.id}" ${String(p.id)===focusId?"selected":""}>${p.num} ${esc(p.name)}</option>`).join("")}</select>
     <span class="legend"><span class="it admin"><span class="tag">交流戦</span>1・2部と4・5部を混ぜた試合、または部の差が3以上の人（味方・相手とも）がいる試合</span><span class="it"><span class="tag pr">ペア練</span>大会ペアが味方で出る試合</span></span></div>
   ${total?`<div class="progress">${started?`<span class="pill">第${started}試合まで開始</span>${started<total?`<span>次は第${started+1}試合</span>`:"<span>全試合が始まりました</span>"}`:"<span>まだ試合は始まっていません</span>"}</div>
-  <p class="note admin">試合がコートに入ったら、その試合の「開始」を押してください。グレーになり、メンバーの画面にも同じように出ます。</p>`:""}
+  <p class="note admin">試合がコートに入ったら、その試合の「開始」を押してください。グレーになり、メンバーの画面にも同じように出ます。</p>
+  <p class="note admin">組み合わせを手で直すときは、名前をつかんで（スマホは少し長押しして）入れ替えたい人の上に落とします。2人を続けてタップしても入れ替わります。同じラウンドの中で、まだ始まっていない試合と休みの人が対象です。</p>`:""}
   ${schedule.rounds.map((r,ri)=>`<div class="round ${ri<done?"done":""}">
     <div class="rhead"><span class="rn">第${ri+1}ラウンド</span>
       ${ri<done?'<span class="tag ok">終了</span>':""}
-      <span class="rest">休み：${r.rest.map(p=>p.num).join("・")||"なし"}</span>
+      ${canEdit(ri)&&r.rest.length?`<span class="rest">休み：</span>`:`<span class="rest">休み：${r.rest.map(p=>p.num).join("・")||"なし"}</span>`}
       ${ri===done?`<button class="btn sm admin" data-act="doneRound" data-i="${ri}">終了</button>`:""}
       ${ri===done-1?`<button class="btn sm admin" data-act="undoRound" data-i="${ri}">終了を取り消す</button>`:""}</div>
-    <div class="courts">${r.games.map(g=>{
+    ${canEdit(ri)&&r.rest.length?`<div class="restchips">${r.rest.map((p,k)=>`<span class="rchip drag ${sel===`${ri}|r|${k}`?"picked":""}" data-slot="${ri}|r|${k}"><span class="no">${p.num}</span>${esc(p.name)}</span>`).join("")}</div>`:""}
+    <div class="courts">${r.games.map((g,gi)=>{
       const has=focusId&&g.teams.flat().some(p=>String(p.id)===focusId);
       const sum=t=>t[0].level+t[1].level;
       const on=g.no<=started;
@@ -817,9 +835,9 @@ function viewMatches(){
         ${admin&&g.no===started+1?`<button class="btn go admin" data-act="startGame" data-no="${g.no}">開始</button>`:""}
         ${admin&&g.no===started?`<button class="btn undo admin" data-act="unstartGame" data-no="${g.no}">開始を取り消す</button>`:""}</div>
         <div class="teams">
-          <div class="team">${g.teams[0].map(pl).join("")}<span class="tsum">部の合計 ${sum(g.teams[0])}</span></div>
+          <div class="team">${g.teams[0].map((p,k)=>pl(p,ri,g,`g|${gi}|0|${k}`)).join("")}<span class="tsum">部の合計 ${sum(g.teams[0])}</span></div>
           <div class="net" aria-hidden="true"></div>
-          <div class="team">${g.teams[1].map(pl).join("")}<span class="tsum">部の合計 ${sum(g.teams[1])}</span></div>
+          <div class="team">${g.teams[1].map((p,k)=>pl(p,ri,g,`g|${gi}|1|${k}`)).join("")}<span class="tsum">部の合計 ${sum(g.teams[1])}</span></div>
         </div></div>`}).join("")}</div>
   </div>`).join("")}`}
   </section>`;
@@ -849,6 +867,84 @@ function viewSummary(){
 }
 
 /* ---------- 操作 ---------- */
+/* ---------- 手で入れ替える（ドラッグ＆ドロップ、またはタップ2回） ----------
+   slot は "ラウンド|g|試合|チーム|位置" か "ラウンド|r|休みの何番目"。同じラウンドの中でだけ入れ替える */
+const dnd={sel:null, drag:null};
+function slotRef(rd, parts){ return parts[0]==="r" ? {arr:rd.rest, i:+parts[1]} : {arr:rd.games[+parts[1]].teams[+parts[2]], i:+parts[3]}; }
+function swapSlots(a,b){
+  const [ra,...pa]=a.split("|"), [rb,...pb]=b.split("|");
+  if(a===b) return;
+  if(ra!==rb){ popup("入れ替えられるのは、同じラウンドの中だけです。"); return; }
+  const ri=+ra, rd=S.day?.rounds?.[ri]; if(!rd) return;
+  const A=slotRef(rd,pa), B=slotRef(rd,pb);
+  const t=A.arr[A.i]; A.arr[A.i]=B.arr[B.i]; B.arr[B.i]=t;
+  // 入れ替えた試合のペア練と交流戦の印を付け直す
+  const pairs=todayPairs(), lv=id=>byId(id)?.level||3;
+  rd.games.forEach(g=>{
+    g.pm=pairs.filter(pr=>g.teams.some(tm=>tm.includes(pr.a)&&tm.includes(pr.b))).map(pr=>pr.k);
+    const ls=g.teams.flat().map(lv); g.cross=(Math.min(...ls)<=2&&Math.max(...ls)>=4)||Math.max(...ls)-Math.min(...ls)>=3;
+  });
+  rd.rest.sort((x,y)=>(S.day.nums?.[x]??0)-(S.day.nums?.[y]??0));
+  if(!S.day.nums){ S.day.nums={}; schedule.P.forEach(p=>S.day.nums[p.id]=p.num); } // 手で直したら番号も固定する
+  schedule=null; stale=false; save(); render();
+  const ng=schedule?.rounds?.[ri]?.games.some(g=>g.bad.length);
+  popup(ng?"入れ替えました（NGペアが同じ試合にいます）":"入れ替えました。");
+}
+function dndCleanup(){
+  const d=dnd.drag; if(!d) return;
+  clearTimeout(d.timer); d.ghost?.remove(); d.el.classList.remove("dragging"); document.body.classList.remove("nosel");
+  document.querySelectorAll(".drop").forEach(x=>x.classList.remove("drop"));
+  dnd.drag=null;
+}
+function dndBegin(){
+  const d=dnd.drag; if(!d) return;
+  d.active=true; d.el.classList.add("dragging"); document.body.classList.add("nosel"); getSelection?.().removeAllRanges();
+  const r=d.el.getBoundingClientRect(), g=d.el.cloneNode(true);
+  g.className="ghost"; g.style.width=r.width+"px"; g.style.left=(d.x-r.width/2)+"px"; g.style.top=(d.y-r.height/2)+"px";
+  document.body.appendChild(g); d.ghost=g; d.w=r.width; d.h=r.height;
+  navigator.vibrate?.(10);
+}
+document.addEventListener("pointerdown",e=>{
+  const el=e.target.closest("[data-slot]"); if(!el||e.button>0) return;
+  if(e.pointerType==="mouse") e.preventDefault(); // マウスで文字が選択されないように
+  dndCleanup();
+  dnd.drag={el,x:e.clientX,y:e.clientY,sx:e.clientX,sy:e.clientY,type:e.pointerType,active:false,timer:null};
+  if(e.pointerType!=="mouse") dnd.drag.timer=setTimeout(dndBegin,220); // スマホは少し長押ししてから
+});
+document.addEventListener("pointermove",e=>{
+  const d=dnd.drag; if(!d) return;
+  d.x=e.clientX; d.y=e.clientY;
+  const dist=Math.hypot(d.x-d.sx,d.y-d.sy);
+  if(!d.active){
+    if(d.type==="mouse"&&dist>5) dndBegin();
+    else if(d.type!=="mouse"&&dist>10){ clearTimeout(d.timer); dnd.drag=null; } // 長押しの前に動いたら画面のスクロール
+    return;
+  }
+  d.ghost.style.left=(d.x-d.w/2)+"px"; d.ghost.style.top=(d.y-d.h/2)+"px";
+  document.querySelectorAll(".drop").forEach(x=>x.classList.remove("drop"));
+  const t=document.elementFromPoint(d.x,d.y)?.closest("[data-slot]");
+  if(t&&t!==d.el) t.classList.add("drop");
+});
+document.addEventListener("touchmove",e=>{ if(dnd.drag?.active) e.preventDefault(); },{passive:false});
+document.addEventListener("pointerup",e=>{
+  const d=dnd.drag; if(!d) return;
+  if(d.active){
+    const t=document.elementFromPoint(e.clientX,e.clientY)?.closest("[data-slot]");
+    const a=d.el.dataset.slot, b=t?.dataset.slot;
+    dndCleanup(); dnd.sel=null;
+    if(b&&b!==a) swapSlots(a,b); else render();
+    return;
+  }
+  // タップ：1人目を選び、2人目をタップすると入れ替える
+  dndCleanup();
+  const a=d.el.dataset.slot;
+  if(!dnd.sel){ dnd.sel=a; render(); }
+  else if(dnd.sel===a){ dnd.sel=null; render(); }
+  else { const s0=dnd.sel; dnd.sel=null; swapSlots(s0,a); }
+});
+document.addEventListener("pointercancel",dndCleanup);
+document.addEventListener("contextmenu",e=>{ if(e.target.closest("[data-slot]")) e.preventDefault(); });
+
 function changed(regen){ if(regen) stale=true; save(); render(); }
 document.addEventListener("click",e=>{
   const t=e.target.closest("[data-tab]");
@@ -857,7 +953,7 @@ document.addEventListener("click",e=>{
   const id=+a.dataset.id, act=a.dataset.act;
   if(act==="setLv"){byId(id).level=+a.dataset.lv;changed(true)}
   if(act==="delMember"){S.members=S.members.filter(m=>m.id!==id);S.attend=S.attend.filter(x=>x!==id);S.ng=S.ng.filter(p=>!p.includes(id));S.tp=S.tp.filter(p=>p.a!==id&&p.b!==id);S.wait=(S.wait||[]).filter(x=>x!==id);changed(true)}
-  if(act==="addMember"){const n=$("#newName").value.trim();if(!n)return;const nid=S.nextId++;S.members.push({id:nid,name:n,level:+$("#newLv").value});S.attend.push(nid);changed(true)}
+  if(act==="addMember"){if(S.members.length>=MAX_MEMBERS){popup(`登録できるのは${MAX_MEMBERS}人までです。`);return}const n=$("#newName")?.value.trim();if(!n)return;const nid=S.nextId++;S.members.push({id:nid,name:n,level:+$("#newLv").value});S.attend.push(nid);changed(true)}
   if(act==="addNg"){const x=+$("#ngA").value,y=+$("#ngB").value;if(x===y||isNg(x,y))return;S.ng.push([x,y]);changed(true)}
   if(act==="delNg"){S.ng.splice(+a.dataset.i,1);changed(true)}
   if(act==="addTp"){const x=+$("#tpA").value,y=+$("#tpB").value;if(!x||!y||x===y)return;
