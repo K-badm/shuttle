@@ -591,11 +591,11 @@ function showStatus(){
     : !cloud.on ? "データはこの端末のブラウザにだけ保存されます。"
     : cloud.err ? "共有サーバーにつながりません："+cloud.err
     : cloud.admin ? (pushMsg||((cloud.owner?"オーナー":"管理者")+"としてログイン中（"+cloud.email+"）。変更はメンバーの画面にも出ます。"))
-    : cloud.ready ? "管理者が組み合わせを変えると、自動で更新されます。" : "読み込み中…";
+    : cloud.ready ? `管理者が組み合わせを変えると、自動で更新されます（最終確認 ${hhmm(cloud.lastPub||Date.now())}）。` : "読み込み中…";
 }
 /* module スクリプト（下）から呼ばれる */
 function cloudPublic(pub){
-  cloud.ready=true;
+  cloud.ready=true; cloud.lastPub=Date.now();
   if(cloud.admin) return;
   S=memberState(pub); schedule=null; stale=false; render();
 }
@@ -1090,6 +1090,9 @@ if (FB) {
       removeAdmin: email => F.deleteDoc(F.doc(db, "admins", email)),
     };
     watchPublic();
+    // スリープや別のアプリから戻ったときは、つなぎ直して最新の組み合わせを読み込む
+    document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") watchPublic(); });
+    window.addEventListener("online", () => watchPublic());
     A.onAuthStateChanged(auth, async user => {
       unsubPriv?.(); unsubPriv = null; unsubAdmins?.(); unsubAdmins = null;
       if (!user) { cloudAuth(false); return; }

@@ -19,6 +19,8 @@ HTML + CSS + JavaScript でビルド不要。スマホのホーム画面に置�
   レベル・NG・交流戦の印は入れない。誰でも読める。メンバーは onSnapshot で自動更新。
 - ログアウトすると、端末に残る管理データ（localStorage の `shuttle-v1` と Firestore のオフライン控え）を消してから読み込み直す（`cloudApi.signOut`）。
   管理者から外されて `private/state` が読めなくなったときも同じ。ページには `noindex` を付け、検索に載らないようにしている。
+- メンバー画面は `public/today` を onSnapshot で受け取り、再読み込みなしで自動更新する。スリープや別アプリから戻ったとき（visibilitychange）と
+  通信が戻ったとき（online）は `watchPublic()` でつなぎ直す。画面下に「最終確認 HH:MM」（`cloud.lastPub`）を出す。
 - Firestore は入れ子の配列を保存できないので、どちらも `{json: JSON.stringify(...)}` で保存している。
 - メンバー画面では `memberState()` で `public/today` をそのまま S として使い、組み合わせは作り直さない（レベルがないため）。
 - 画面を直したら `sw.js` の `VERSION` を上げる。
