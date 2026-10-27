@@ -143,6 +143,14 @@ body.user .match.cross{border-color:var(--line);box-shadow:none}
 .drag.picked{outline:2px solid var(--court);outline-offset:1px;background:var(--cork-soft)}
 .ghost{position:fixed;z-index:40;pointer-events:none;display:flex;gap:6px;align-items:center;font-size:14px;padding:4px 8px;border-radius:8px;background:var(--surface);border:2px solid var(--cork);box-shadow:0 8px 24px rgba(0,0,0,.25)}
 .restchips{display:flex;flex-wrap:wrap;gap:4px}
+.logl{display:grid;border:1px solid var(--line);border-radius:8px;max-height:220px;overflow:auto}
+.logi{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;padding:6px 10px;border-bottom:1px solid var(--line);font-size:14px}
+.logi:last-child{border-bottom:0}
+.logi .lt{font-family:var(--f-mono);font-size:12px;color:var(--muted);min-width:38px}
+.logi .ln{font-weight:700}
+.lk{font-size:11px;font-weight:700;padding:1px 8px;border-radius:999px;background:var(--cork-soft);color:var(--cork)}
+.lk-leave,.lk-absent{background:var(--warn-soft);color:var(--warn)}
+.lk-arrive,.lk-join{background:var(--court);color:var(--court-ink)}
 .rchip .no{min-width:0}
 body.nosel{-webkit-user-select:none;user-select:none}
 .rchip{display:inline-flex;gap:4px;align-items:center;font-size:12px;padding:2px 8px;border:1px solid var(--line);border-radius:999px;background:var(--surface)}
@@ -287,6 +295,14 @@ const mkChip = k => k==null ? "" : `<span class="mk mk${k%6}" title="大会ペ�
 function waitSet(){ if(S.waitDate!==TODAY){ S.wait=[]; S.waitDate=TODAY; } return new Set(S.wait||[]); }
 /* 今いる参加者（到着待ちの人を除く）。組み合わせはこの人たちだけで作る */
 function here(){ const w=waitSet(); return S.attend.filter(id=>!w.has(id)); }
+/* 今日の記録（遅刻・到着・早退）。日付が変わったら空にする。組み直しやリセットでは消さない */
+const LOG_LABEL={wait:"遅刻の連絡",arrive:"到着（遅刻）",join:"到着（予定外）",leave:"早退",absent:"来なかった"};
+function dayLog(){ if(S.logDate!==TODAY){ S.log=[]; S.logDate=TODAY; } return S.log; }
+function logEv(type, ids){ const L=dayLog(), at=Date.now(), game=S.day?.started||0, done=S.day?.done||0;
+  ids.forEach(id=>L.push({type,id,at,game,done})); }
+const hhmm=t=>{ const d=new Date(t); return `${d.getHours()}:${String(d.getMinutes()).padStart(2,"0")}`; };
+/* その人の最後の到着時刻（なければ null） */
+function arrivedAt(id){ const e=[...dayLog()].reverse().find(x=>x.id===id&&(x.type==="arrive"||x.type==="join")); return e?e.at:null; }
 /* 今日有効な大会ペア（両方が来ている組だけ） */
 function todayPairs(){
   const on=new Set(here());
@@ -760,6 +776,14 @@ function statsStrip(){
     ${schedule.pairs.length?`<div class="stat"><b style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">${schedule.pairs.map((p,j)=>`<span style="display:inline-flex;gap:3px;align-items:center">${mkChip(p.k)}${schedule.pc[j]}</span>`).join("")}</b><span>大会ペアのペア練（回）</span></div>`:""}
   </div>`;
 }
+/* 今日の記録の一覧（新しい順） */
+function viewLog(){
+  const L=dayLog(); if(!L.length) return "";
+  const when=e=>e.game?`第${e.game}試合まで開始のとき`:e.done?`第${e.done}ラウンド終了後`:"試合が始まる前";
+  return `<div style="display:grid;gap:4px"><h3>今日の記録</h3><div class="logl">${[...L].reverse().map(e=>`<div class="logi">
+    <span class="lt">${hhmm(e.at)}</span><span class="ln">${esc(byId(e.id)?.name||"（削除済み）")}</span>
+    <span class="lk lk-${e.type}">${LOG_LABEL[e.type]||e.type}</span><span class="note">${when(e)}</span></div>`).join("")}</div></div>`;
+}
 /* 複数人を選べるプルダウン。何も選んでいないときは「該当なし」 */
 function msel(id, items){
   return `<details class="msel" id="${id}"><summary><span class="msum">該当なし</span></summary><div class="mlist2">${
@@ -785,6 +809,7 @@ function viewLate(P){
     <div style="display:grid;gap:6px"><span class="note">早退する人</span>
       <div class="row">${msel("mOut",P.map(pl))}<button class="btn" data-act="earlyOut">帰った（早退）</button></div></div>
     <p class="note">到着待ちの人が来なくなったときは、「今日の参加者」でチェックを外してください。</p>
+    ${viewLog()}
     ${done?`<div class="row"><button class="btn" data-act="resetDay">進行をリセット（最初から組み直す）</button></div>`:""}
     ${done&&done>=R?'<p class="note">全ラウンドが終わりました。</p>':""}
   </div>`;
@@ -850,7 +875,8 @@ function viewSummary(){
   games.forEach(g=>g.teams.flat().forEach(p=>{if(!inP.has(p.id)) gone.set(p.id,p)}));
   const P=[...schedule.P,...gone.values()];
   const joined=S.day?.joined||{};
-  const st=p=>!inP.has(p.id)?' <span class="note">（早退）</span>':joined[p.id]===0?` <span class="note">（遅刻）</span>`:joined[p.id]!=null?` <span class="note">（第${joined[p.id]+1}Rから）</span>`:"";
+  const arr=p=>{ const t=arrivedAt(p.id); return t?`・${hhmm(t)}着`:""; };
+  const st=p=>!inP.has(p.id)?' <span class="note">（早退）</span>':joined[p.id]===0?` <span class="note">（遅刻${arr(p)}）</span>`:joined[p.id]!=null?` <span class="note">（第${joined[p.id]+1}Rから${arr(p)}）</span>`:"";
   const R=schedule.rounds.length;
   return `<section class="panel">
   <div><h2>集計</h2><p class="note">行をタップすると、組み合わせ画面でその人の試合を強調します。マス目は各ラウンドの出場<span class="admin">（橙は交流戦）</span>。</p></div>
@@ -977,11 +1003,13 @@ document.addEventListener("click",e=>{
     dy.started=+a.dataset.no;changed(false)}
   if(act==="unstartGame"){S.day.started=Math.max(0,+a.dataset.no-1);changed(false)}
   if(act==="lateMark"){const xs=mselValues("mLate");if(!xs.length)return;announce=true;waitSet();
+    const nw=xs.filter(x=>!S.wait.includes(x)); logEv("wait",nw);
     S.wait=[...new Set([...S.wait,...xs])];changed(true)}
   if(act==="lateIn"){const xs=mselValues("mIn");if(!xs.length)return;announce=true;waitSet();
     if(S.arrivedDate!==TODAY){S.arrived=[];S.arrivedDate=TODAY} S.arrived=[...new Set([...S.arrived,...xs])];
+    logEv("arrive",xs.filter(x=>S.wait.includes(x))); logEv("join",xs.filter(x=>!S.wait.includes(x)));
     S.wait=S.wait.filter(y=>!xs.includes(y)); xs.forEach(x=>{ if(!S.attend.includes(x)) S.attend.push(x) });changed(true)}
-  if(act==="earlyOut"){const xs=mselValues("mOut");if(!xs.length)return;announce=true;
+  if(act==="earlyOut"){const xs=mselValues("mOut");if(!xs.length)return;announce=true; logEv("leave",xs);
     S.attend=S.attend.filter(y=>!xs.includes(y)); S.wait=(S.wait||[]).filter(y=>!xs.includes(y));changed(true)}
   if(act==="resetDay"){if(!confirm("終わったラウンドの記録を消して、最初から組み直しますか？"))return;S.day=null;changed(true)}
   if(act==="mode"&&cloud.on&&!cloud.admin){tab=tab==="login"?"matches":"login";render();return}
@@ -999,6 +1027,7 @@ document.addEventListener("click",e=>{
 document.addEventListener("change",e=>{
   if(e.target.dataset.act==="toggleAttend"){const id=+e.target.dataset.id;
     S.attend=e.target.checked?[...S.attend,id]:S.attend.filter(x=>x!==id);
+    if(!e.target.checked && waitSet().has(id)) logEv("absent",[id]);
     if(!e.target.checked) S.wait=(S.wait||[]).filter(x=>x!==id);changed(true)}
   if(e.target.dataset.msel){const box=document.getElementById(e.target.dataset.msel);
     const names=[...box.querySelectorAll("input:checked")].map(x=>x.dataset.name);
