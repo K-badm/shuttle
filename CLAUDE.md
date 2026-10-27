@@ -17,6 +17,8 @@ HTML + CSS + JavaScript でビルド不要。スマホのホーム画面に置�
 - `private/state`：S 全体（レベル・NG含む）。管理者だけ読み書き。
 - `public/today`：`publicState()` で作るメンバー用の中身。名前・番号・組み合わせ・大会ペアのマークだけで、
   レベル・NG・交流戦の印は入れない。誰でも読める。メンバーは onSnapshot で自動更新。
+- ログアウトすると、端末に残る管理データ（localStorage の `shuttle-v1` と Firestore のオフライン控え）を消してから読み込み直す（`cloudApi.signOut`）。
+  管理者から外されて `private/state` が読めなくなったときも同じ。ページには `noindex` を付け、検索に載らないようにしている。
 - Firestore は入れ子の配列を保存できないので、どちらも `{json: JSON.stringify(...)}` で保存している。
 - メンバー画面では `memberState()` で `public/today` をそのまま S として使い、組み合わせは作り直さない（レベルがないため）。
 - 画面を直したら `sw.js` の `VERSION` を上げる。

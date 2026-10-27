@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>組み合わせ</title>
+<meta name="robots" content="noindex,nofollow">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -1076,7 +1077,13 @@ if (FB) {
     const watchPublic = () => { unsub?.(); unsub = F.onSnapshot(pubRef, s => cloudPublic(parse(s)), e => cloudError(e.code || e.message)); };
     window.cloudApi = {
       signIn: (email, pw) => A.signInWithEmailAndPassword(auth, email, pw),
-      signOut: () => A.signOut(auth),
+      // ログアウトしたら、この端末に残っている管理データ（部・NGペアなど）も消す
+      signOut: async () => {
+        try { localStorage.removeItem("shuttle-v1"); } catch (e) {}
+        await A.signOut(auth);
+        try { await F.terminate(db); await F.clearIndexedDbPersistence(db); } catch (e) {}
+        location.reload();
+      },
       push: (priv, pub) => Promise.all([F.setDoc(privRef, priv), F.setDoc(pubRef, pub)]),
       refreshPublic: watchPublic,
       addAdmin: email => F.setDoc(F.doc(db, "admins", email), { addedAt: Date.now() }),
@@ -1099,7 +1106,7 @@ if (FB) {
       cloudAuth(true, priv, { owner: role === "owner", email });
       // ほかの管理者の変更をすぐ反映する
       unsubPriv = F.onSnapshot(privRef, s => { if (!s.metadata.hasPendingWrites && s.exists()) cloudPrivate(s.data()); },
-        e => { if (e.code === "permission-denied") A.signOut(auth); });
+        e => { if (e.code === "permission-denied") window.cloudApi.signOut(); }); // 管理者から外されたら、端末の控えも消して出る
       if (role === "owner") unsubAdmins = F.onSnapshot(F.collection(db, "admins"), qs => cloudAdmins(qs.docs.map(d => d.id).sort()), () => {});
     });
   } catch (e) { cloudError(e.message); }
