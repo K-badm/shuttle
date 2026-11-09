@@ -60,6 +60,21 @@ nav.tabs{display:flex;gap:2px;width:100%;overflow-x:auto;margin-top:6px}
 nav.tabs button{flex:1 0 auto;min-width:0;white-space:nowrap;background:none;border:0;color:var(--court-ink);opacity:.7;font:500 14px var(--f-body);padding:10px 10px;border-bottom:3px solid transparent;cursor:pointer}
 nav.tabs button[aria-selected="true"]{opacity:1;border-bottom-color:var(--cork);font-weight:700}
 main{padding-block:20px 48px;display:grid;gap:20px}
+/* 「今日」タブ：表示する内容を選ぶボタンと、選んだ内容を並べる欄。
+   横に広い画面（タブレットの横向きなど）では横に並べ、欄ごとにスクロールする */
+body.wide .wrap{max-width:1480px}
+.paneSel{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.pchip{font:700 14px var(--f-body);border:1px solid var(--line);background:var(--surface);color:var(--muted);border-radius:999px;padding:8px 16px;min-height:40px;cursor:pointer}
+.pchip[aria-pressed="true"]{background:var(--court);border-color:var(--court);color:var(--court-ink)}
+.pchip[aria-pressed="true"]::before{content:"✓ "}
+.panes{display:flex;flex-direction:column;gap:28px}
+.pane{min-width:0}
+@media (min-width:900px){
+  .panes.multi{flex-direction:row;align-items:flex-start;gap:16px}
+  .panes.multi .pane{flex:1 1 0;position:sticky;top:calc(var(--hdr,100px) + 8px);max-height:calc(100dvh - var(--hdr,100px) - 16px);overflow-y:auto;overscroll-behavior:contain;padding:2px 6px 24px 2px}
+  .panes.multi .pane-matches{flex-grow:1.8}
+}
+
 section.panel{display:grid;gap:16px}
 h2{font-family:var(--f-display);font-weight:800;font-size:19px;margin:0;text-wrap:balance}
 h3{font-size:14px;margin:0;color:var(--muted);font-weight:700;letter-spacing:.04em}
@@ -199,6 +214,9 @@ tr:last-child td{border-bottom:0}
 .pips{display:flex;gap:2px}
 .pip{width:8px;height:14px;border-radius:2px;background:var(--line)}
 .pip.on{background:var(--court)} .pip.x{background:var(--cork)}
+.pip.fut{opacity:.35} /* これからの試合 */
+td.now{font-weight:700;font-size:15px}
+td.now.low{color:var(--cork)} /* 今いちばん少ない人 */
 body.user .pip.x{background:var(--court)}
 tr.click{cursor:pointer} tr.click:hover td{background:var(--bg)}
 body.user .lv,body.user .tsum,body.user .admin{display:none!important}
@@ -210,7 +228,17 @@ body:not(.owner) .owner{display:none!important}
 .modebtn[aria-pressed="true"]{background:var(--cork);border-color:var(--cork);color:#1b1206}
 .mock{font-size:12px;color:var(--muted);text-align:center}
 @media (prefers-reduced-motion:no-preference){.match{transition:opacity .15s}}
-</style>
+/* 指で操作する画面（タブレット・スマホ）では、押す所を大きくする */
+@media (pointer:coarse){
+  button.btn{min-height:44px;padding:10px 16px}
+  .rhead .btn.sm{min-height:40px}
+  .pchip{min-height:44px;padding:10px 18px;font-size:15px}
+  nav.tabs button{padding:12px 10px;font-size:15px}
+  .seg button{width:46px;height:42px}
+  label.chk{min-height:48px}
+  label.chk input{width:22px;height:22px}
+  input[type=text],input[type=number],select{min-height:42px}
+}</style>
 </head>
 <body>
 
@@ -224,9 +252,7 @@ body:not(.owner) .owner{display:none!important}
     <button class="modebtn" id="modeBtn" data-act="mode" aria-pressed="false">管理者</button>
     <nav class="tabs" role="tablist">
       <button role="tab" class="admin" data-tab="members" id="t-members">メンバー</button>
-      <button role="tab" class="admin" data-tab="attend" id="t-attend">今日の参加者</button>
-      <button role="tab" data-tab="matches" id="t-matches">組み合わせ</button>
-      <button role="tab" data-tab="summary" id="t-summary">集計</button>
+      <button role="tab" data-tab="today" id="t-today">今日</button>
       <button role="tab" class="admin owner" data-tab="admins" id="t-admins">管理者</button>
     </nav>
   </div>
@@ -236,7 +262,7 @@ body:not(.owner) .owner{display:none!important}
 <div class="popup" id="popup" role="status" aria-live="polite" hidden></div>
 <div class="wrap"><p class="mock" id="status">データはこの端末のブラウザにだけ保存されます。</p></div>
 
-<script src="app.js?v=2"></script>
+<script src="app.js?v=4"></script>
 <script type="module" src="cloud.js?v=1"></script>
 
 </body>

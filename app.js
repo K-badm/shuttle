@@ -87,10 +87,15 @@ const TODAY=`${d.getFullYear()}.${String(d.getMonth()+1).padStart(2,"0")}.${Stri
    off（途中参加の人の試合数の下駄）, joined（途中参加したラウンド）, present（前回組んだときの参加者）} */
 if(S.day && S.day.date!==TODAY) S.day=null;
 
-let tab = "matches", schedule = null, stale = false, focusId = "", mode = "admin";
+let tab = "today", schedule = null, stale = false, focusId = "", mode = "admin";
+/* 「今日」タブで表示する内容（いくつでも選べる）。この端末だけに覚える */
+const PANES=[{k:"attend",label:"今日の参加者",admin:true},{k:"matches",label:"組み合わせ"},{k:"summary",label:"集計"}];
+let panes=["matches","summary"];
+try{ const v=JSON.parse(localStorage.getItem("shuttle-panes")); if(Array.isArray(v)&&v.length) panes=v.filter(k=>PANES.some(p=>p.k===k)); }catch(e){}
 try{ mode = localStorage.getItem("shuttle-mode") || "admin" }catch(e){}
-try{ tab = localStorage.getItem("shuttle-tab") || "matches" }catch(e){}
-if(cloud.on || LOCKED){ S = memberState(null); mode = "user"; tab = "matches"; } // ログインが確かめられるまではメンバー画面
+try{ tab = localStorage.getItem("shuttle-tab") || "today" }catch(e){}
+if(["attend","matches","summary"].includes(tab)) tab="today"; // 前の版のタブ名
+if(cloud.on || LOCKED){ S = memberState(null); mode = "user"; tab = "today"; } // ログインが確かめられるまではメンバー画面
 const $ = s => document.querySelector(s);
 const esc = s => String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const byId = id => S.members.find(m=>m.id===id);
@@ -506,7 +511,7 @@ function cloudAuth(isAdmin, priv, info){
     if(cloud.admin){ cloud.admin=false; pushMsg=""; S=memberState(null); schedule=null; render(); window.cloudApi?.refreshPublic(); }
     showStatus(); return;
   }
-  cloud.admin=true; mode="admin"; tab="matches";
+  cloud.admin=true; mode="admin"; tab="today";
   if(priv){ try{ S=clean(JSON.parse(priv.json))||LOCAL }catch(e){ S=LOCAL } } else S=LOCAL; // 初めてなら、この端末の分を送る
   if(S.day && S.day.date!==TODAY) S.day=null;
   schedule=null; stale=false; render(); queuePush();
@@ -571,22 +576,41 @@ function render(){
   const user=mode==="user";
   document.body.classList.toggle("user",user);
   document.body.classList.toggle("owner",cloud.on && cloud.owner);
-  if(tab==="admins" && !(cloud.on && cloud.owner && !user)) tab="matches";
+  if(tab==="admins" && !(cloud.on && cloud.owner && !user)) tab="today";
   const mb=$("#modeBtn"); mb.textContent=user?"メンバー画面":"管理者画面"; mb.setAttribute("aria-pressed",String(!user));
   mb.title=user?"タップで管理者画面に切り替え":"タップでメンバー画面に切り替え";
   if(cloud.on && !cloud.admin){ mb.textContent="管理者ログイン"; mb.title="管理者はここからログイン"; }
   mb.hidden = LOCKED;
-  if(tab==="login" && (!cloud.on || cloud.admin)) tab="matches";
-  if(user&&(tab==="members"||tab==="attend")) tab="matches";
+  if(tab==="login" && (!cloud.on || cloud.admin)) tab="today";
+  if(user&&tab==="members") tab="today";
   document.querySelectorAll("nav.tabs button").forEach(b=>b.setAttribute("aria-selected",b.dataset.tab===tab));
   const m=$("#main");
+  // 並べて表示しているときは、それぞれの欄のスクロール位置を描き直しても保つ
+  const keep={}; m.querySelectorAll(".pane").forEach(el=>keep[el.dataset.pane]=el.scrollTop);
+  const multi=tab==="today" && shownPanes().length>1;
+  document.body.classList.toggle("wide",multi);
   if(tab==="members") m.innerHTML=viewMembers();
-  if(tab==="attend") m.innerHTML=viewAttend();
-  if(tab==="matches") m.innerHTML=viewMatches();
-  if(tab==="summary") m.innerHTML=viewSummary();
+  if(tab==="today") m.innerHTML=viewToday();
   if(tab==="login") m.innerHTML=viewLogin();
   if(tab==="admins") m.innerHTML=viewAdmins();
+  m.querySelectorAll(".pane").forEach(el=>{ if(keep[el.dataset.pane]) el.scrollTop=keep[el.dataset.pane]; });
+  setHeaderHeight();
   showStatus();
+}
+/* 見出し（タブの帯）の高さ。並べて表示するときの各欄の高さに使う */
+function setHeaderHeight(){ const h=document.querySelector("header.top"); if(h) document.documentElement.style.setProperty("--hdr",h.offsetHeight+"px"); }
+window.addEventListener("resize",setHeaderHeight);
+/* 今この端末で選べる内容と、表示する内容（メンバー画面では「今日の参加者」は選べない） */
+function panesFor(){ const user=document.body.classList.contains("user"); return PANES.filter(p=>!(p.admin&&user)); }
+function shownPanes(){ const av=panesFor(); const on=av.filter(p=>panes.includes(p.k)); return on.length?on:av.filter(p=>p.k==="matches"); }
+/* 「今日」タブ：今日の参加者・組み合わせ・集計から、表示するものを選んで並べる */
+function viewToday(){
+  const av=panesFor(), on=shownPanes();
+  const html={attend:viewAttend,matches:viewMatches,summary:viewSummary};
+  return `<div class="paneSel" role="group" aria-label="表示する内容">
+    ${av.map(p=>`<button class="pchip" data-act="pane" data-k="${p.k}" aria-pressed="${on.includes(p)}">${p.label}</button>`).join("")}
+    <span class="note">押すと表示・非表示を切り替えます。いくつでも並べられます。</span></div>
+  <div class="panes ${on.length>1?"multi":""}">${on.map(p=>`<div class="pane pane-${p.k}" data-pane="${p.k}">${html[p.k]()}</div>`).join("")}</div>`;
 }
 function viewMembers(){
   const ngIds=new Set(S.ng.flat());
@@ -726,6 +750,7 @@ function viewMatches(){
   const sel=dnd.sel;
   const pl=(p,ri,g,slot)=>`<div class="p ${String(p.id)===focusId?"hl":""} ${canEdit(ri,g)?"drag":""} ${sel===`${ri}|${slot}`?"picked":""}" ${canEdit(ri,g)?`data-slot="${ri}|${slot}"`:""}><span class="no">${p.num}</span>${lvChip(p.level)}<span class="nm">${esc(p.name)}</span>${mkChip(p.mk)}</div>`;
   return `<section class="panel">
+  <h2>組み合わせ</h2>
   <div class="box admin"><div class="cfg">
     <label for="cfgM">試合数<input type="number" id="cfgM" min="1" max="80" value="${cfg.matches}"></label>
     <label for="cfgC">コート数<input type="number" id="cfgC" min="1" max="8" value="${cfg.courts}"></label>
@@ -779,16 +804,25 @@ function viewSummary(){
   const arr=p=>{ const t=arrivedAt(p.id); return t?`・${hhmm(t)}着`:""; };
   const st=p=>!inP.has(p.id)?' <span class="note">（早退）</span>':joined[p.id]===0?` <span class="note">（遅刻${arr(p)}）</span>`:joined[p.id]!=null?` <span class="note">（第${joined[p.id]+1}Rから${arr(p)}）</span>`:"";
   const R=schedule.rounds.length;
+  // 今までに入った試合：「開始」を押した試合と、終わったラウンドの試合
+  const started=S.day?.started||0, done=S.day?.done||0;
+  const played=g=>g.no<=started||g.ri<done;
+  const now={}; games.filter(played).forEach(g=>g.teams.flat().forEach(p=>now[p.id]=(now[p.id]||0)+1));
+  const playedN=games.filter(played).length;
+  const nowVals=schedule.P.map(p=>now[p.id]||0), nmin=nowVals.length?Math.min(...nowVals):0, nmax=nowVals.length?Math.max(...nowVals):0;
   return `<section class="panel">
-  <div><h2>集計</h2><p class="note">行をタップすると、組み合わせ画面でその人の試合を強調します。マス目は各ラウンドの出場<span class="admin">（橙は交流戦）</span>。</p></div>
+  <div><h2>集計</h2><p class="note">「今まで」は、もうコートに入った試合の数（「開始」を押した試合まで）です。「予定」は今日の全部の試合の数です。
+    行をタップすると、組み合わせでその人の試合を強調します。マス目は各ラウンドの出場で、濃いマスが入った試合、薄いマスがこれからの試合です<span class="admin">（橙は交流戦）</span>。</p></div>
+  ${games.length?`<div class="progress"><span class="pill">今まで ${playedN}試合 / 全${games.length}試合</span>${playedN?`<span>今いる人の今までの試合数：${nmin===nmax?nmin:nmin+"〜"+nmax}回</span>`:"<span>まだ試合は始まっていません</span>"}</div>`:""}
   ${schedule.P.length<4&&!games.length?"":statsStrip()}
   <div class="tablewrap"><table>
-    <thead><tr><th>番号</th><th>名前</th><th class="admin">部</th><th style="text-align:right">試合</th><th class="admin" style="text-align:right">交流戦</th><th style="text-align:right">ペア練</th><th>ラウンド別</th></tr></thead>
+    <thead><tr><th>番号</th><th>名前</th><th class="admin">部</th><th style="text-align:right">今まで</th><th style="text-align:right">予定</th><th class="admin" style="text-align:right">交流戦</th><th style="text-align:right">ペア練</th><th>ラウンド別</th></tr></thead>
     <tbody>${P.map(p=>{
       const mine=games.filter(g=>g.teams.flat().some(q=>q.id===p.id));
-      const pips=[...Array(R)].map((_,ri)=>{const g=mine.find(x=>x.ri===ri);return `<span class="pip ${g?(g.cross?"x":"on"):""}"></span>`}).join("");
+      const pips=[...Array(R)].map((_,ri)=>{const g=mine.find(x=>x.ri===ri);return `<span class="pip ${g?(g.cross?"x":"on"):""} ${g&&!played(g)?"fut":""}"></span>`}).join("");
+      const nn=now[p.id]||0, low=playedN&&inP.has(p.id)&&nn===nmin&&nmin<nmax;
       return `<tr class="click" data-act="focusP" data-id="${p.id}" tabindex="0"><td class="n">${p.num}</td><td>${esc(p.name)}${st(p)}</td><td class="admin">${lvChip(p.level)}</td>
-      <td class="n">${schedule.cnt[p.id]||0}</td><td class="n admin">${schedule.xc[p.id]||0}</td><td class="n">${p.mk==null?"–":mkChip(p.mk)+" "+(schedule.ppc[p.id]||0)}</td><td><div class="pips">${pips}</div></td></tr>`}).join("")}</tbody>
+      <td class="n now ${low?"low":""}" ${low?'title="今いちばん少ない人"':""}>${nn}</td><td class="n">${schedule.cnt[p.id]||0}</td><td class="n admin">${schedule.xc[p.id]||0}</td><td class="n">${p.mk==null?"–":mkChip(p.mk)+" "+(schedule.ppc[p.id]||0)}</td><td><div class="pips">${pips}</div></td></tr>`}).join("")}</tbody>
   </table></div>
   </section>`;
 }
@@ -913,7 +947,13 @@ document.addEventListener("click",e=>{
   if(act==="earlyOut"){const xs=mselValues("mOut");if(!xs.length)return;announce=true; logEv("leave",xs);
     S.attend=S.attend.filter(y=>!xs.includes(y)); S.wait=(S.wait||[]).filter(y=>!xs.includes(y));changed(true)}
   if(act==="resetDay"){if(!confirm("終わったラウンドの記録を消して、最初から組み直しますか？"))return;S.day=null;changed(true)}
-  if(act==="mode"&&cloud.on&&!cloud.admin){tab=tab==="login"?"matches":"login";render();return}
+  if(act==="mode"&&cloud.on&&!cloud.admin){tab=tab==="login"?"today":"login";render();return}
+  if(act==="pane"){ // 表示する内容の切り替え（最低1つは残す）
+    const k=a.dataset.k, on=shownPanes().map(p=>p.k);
+    const next=on.includes(k)?on.filter(x=>x!==k):PANES.map(p=>p.k).filter(x=>x===k||on.includes(x));
+    if(!next.length){ popup("どれか1つは表示してください。"); return; }
+    panes=next; try{localStorage.setItem("shuttle-panes",JSON.stringify(panes))}catch(_){}
+    render(); return; }
   if(act==="logout"){window.cloudApi?.signOut();return}
   if(act==="addAdmin"){const inp=$("#newAdmin"), v=inp.value.trim().toLowerCase(), msg=$("#adminMsg");
     if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v)){msg.textContent="メールアドレスの形になっていません。";return}
@@ -923,7 +963,10 @@ document.addEventListener("click",e=>{
   if(act==="copyUrl"){navigator.clipboard?.writeText(a.dataset.url).then(()=>{a.textContent="コピーしました"},()=>{});return}
   if(act==="mode"&&LOCKED) return;
   if(act==="mode"){mode=mode==="user"?"admin":"user";try{localStorage.setItem("shuttle-mode",mode)}catch(_){}render();return}
-  if(act==="focusP"){focusId=String(id);tab="matches";render();window.scrollTo(0,0)}
+  if(act==="focusP"){focusId=String(id);tab="today";
+    if(!shownPanes().some(p=>p.k==="matches")){ panes=[...new Set([...panes,"matches"])]; try{localStorage.setItem("shuttle-panes",JSON.stringify(panes))}catch(_){} }
+    render(); // その人の最初の試合が見えるところまで動かす
+    const hl=document.querySelector(".pane-matches .p.hl"); if(hl) hl.scrollIntoView({block:"center",behavior:"smooth"}); else window.scrollTo(0,0); }
 });
 document.addEventListener("change",e=>{
   if(e.target.dataset.act==="toggleAttend"){const id=+e.target.dataset.id;
