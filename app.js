@@ -575,8 +575,9 @@ function viewLogin(){
 }
 function viewShare(){
   const url=location.href.split(/[?#]/)[0].replace(/index\.html$/,"");
-  return det("share","メンバーと共有中","URL・ログアウト",`<p class="note">このURLをメンバーに送ってください。メンバーの画面では、部・NGペア・交流戦の印は出ません（データ自体を送っていません）。</p>
+  return det("share","メンバーと共有中","QRコード・URL・ログアウト",`<p class="note">QRコードを会場に貼るか、このURLをメンバーに送ってください。URLは毎回同じです。メンバーの画面では、部・NGペア・交流戦の印は出ません（データ自体を送っていません）。</p>
     <div class="row"><input type="text" readonly value="${esc(url)}" style="flex:1;min-width:180px;font-family:var(--f-mono);font-size:13px" aria-label="メンバー用URL">
+      <button class="btn primary" data-act="showQr" data-url="${esc(url)}">QRコードを表示</button>
       <button class="btn" data-act="copyUrl" data-url="${esc(url)}">URLをコピー</button>
       <button class="btn" data-act="logout">ログアウト</button></div>`,"admin");
 }
@@ -605,11 +606,14 @@ function render(){
   if(tab==="login") m.innerHTML=viewLogin();
   if(tab==="admins") m.innerHTML=viewAdmins();
   m.querySelectorAll(".pane").forEach(el=>{ if(keep[el.dataset.pane]) el.scrollTop=keep[el.dataset.pane]; });
-  setHeaderHeight();
   showStatus();
+  setHeaderHeight();
 }
 /* 見出し（タブの帯）の高さ。並べて表示するときの各欄の高さに使う */
-function setHeaderHeight(){ const h=document.querySelector("header.top"); if(h) document.documentElement.style.setProperty("--hdr",h.offsetHeight+"px"); }
+function setHeaderHeight(){ const h=document.querySelector("header.top"), st=document.documentElement.style;
+  if(h) st.setProperty("--hdr",h.offsetHeight+"px");
+  const ps=document.querySelector(".paneSel"); if(ps) st.setProperty("--psel",ps.offsetHeight+"px");
+  const ft=document.querySelector("#status")?.parentElement; if(ft) st.setProperty("--foot",ft.offsetHeight+"px"); }
 window.addEventListener("resize",setHeaderHeight);
 /* 折りたたみの欄（設定・遅刻早退・使い方など）。組み合わせを画面の上のほうに出すため、ふだんは閉じておく。
    開いているかどうかは端末ごとに覚え、描き直しても保つ */
@@ -988,6 +992,7 @@ document.addEventListener("click",e=>{
     if(v===cloud.email){msg.textContent="オーナーは登録しなくても管理者です。";return}
     inp.value=""; window.cloudApi?.addAdmin(v).then(()=>{const m2=$("#adminMsg"); if(m2) m2.textContent=v+" を管理者にしました。"},err=>{const m2=$("#adminMsg"); if(m2) m2.textContent="追加できませんでした（"+(err.code||err.message)+"）"}); return}
   if(act==="delAdmin"){const v=a.dataset.email; window.cloudApi?.removeAdmin(v).catch(err=>{const m2=$("#adminMsg"); if(m2) m2.textContent="外せませんでした（"+(err.code||err.message)+"）"}); return}
+  if(act==="showQr"){showQr(a.dataset.url);return}
   if(act==="copyUrl"){navigator.clipboard?.writeText(a.dataset.url).then(()=>{a.textContent="コピーしました"},()=>{});return}
   if(act==="mode"&&LOCKED) return;
   if(act==="mode"){mode=mode==="user"?"admin":"user";try{localStorage.setItem("shuttle-mode",mode)}catch(_){}render();return}
@@ -1029,3 +1034,51 @@ document.addEventListener("submit",async e=>{
 $("#today").textContent=TODAY;
 render();
 if("serviceWorker" in navigator && location.protocol.startsWith("http")) navigator.serviceWorker.register("sw.js").catch(()=>{});
+
+/* ---------- QRコード（管理者が会場で見せる・印刷する） ---------- */
+// LINE の中で読まれても標準のブラウザで開くように openExternalBrowser=1 を付ける（LINE の決まり）。
+function showQr(url){
+  const box=$("#qrbox"); if(!box||!window.qrSvg) return;
+  const svg=qrSvg(url+"?openExternalBrowser=1");
+  if(!svg){ popup("QRコードを作れませんでした。"); return; }
+  box.innerHTML=`<div class="qrcard" role="dialog" aria-modal="true" aria-label="メンバー用のQRコード">
+    <h2>本日の組み合わせ</h2>
+    <p class="qlead">スマホのカメラで読み取ってください</p>
+    <div class="qrimg">${svg}</div>
+    <p class="qsub">試合の順番と、自分の試合数が見られます。画面は自動で新しくなります。</p>
+    <p class="qurl">${esc(url)}</p>
+    <div class="qbtns"><button class="btn primary" data-qr="print">印刷する</button><button class="btn" data-qr="close">閉じる</button></div>
+  </div>`;
+  box.hidden=false; document.body.classList.add("qr-open");
+}
+function hideQr(){ const box=$("#qrbox"); if(!box) return; box.hidden=true; box.innerHTML=""; document.body.classList.remove("qr-open"); }
+document.addEventListener("click",e=>{ const b=e.target.closest?.("[data-qr]");
+  if(b){ if(b.dataset.qr==="print") window.print(); else hideQr(); return; }
+  if(e.target.id==="qrbox") hideQr(); });
+document.addEventListener("keydown",e=>{ if(e.key==="Escape") hideQr(); });
+
+/* ---------- ホーム画面に追加する案内 ---------- */
+// 追加そのものは本人の操作が要る（OS の決まり）。Android はボタン、iPhone はやり方を出す。
+// ホーム画面から開いているとき・一度閉じたあと（localStorage の shuttle-a2hs）は出さない。
+let installEvt=null;
+function a2hs(){
+  const el=$("#a2hs"); if(!el) return;
+  let off=false; try{ off=!!localStorage.getItem("shuttle-a2hs") }catch(e){}
+  const standalone=matchMedia("(display-mode: standalone)").matches || navigator.standalone===true;
+  const ua=navigator.userAgent, ios=/iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints>1);
+  const android=/Android/.test(ua), inapp=/\bLine\/|FBAN|FBAV|Instagram/i.test(ua);
+  if(off || standalone || !(installEvt || ios || android)){ el.hidden=true; return; }
+  let body;
+  if(inapp) body=`<p>ホーム画面に追加するには、${ios?"Safari":"Chrome"} で開いてください。<br>右下か右上のメニューから「${ios?"Safariで開く":"ブラウザで開く"}」を選びます。</p>`;
+  else if(installEvt) body=`<p>ホーム画面に追加すると、次からすぐ開けます。</p><button class="btn primary" data-a2="install">ホーム画面に追加</button>`;
+  else if(ios) body=`<p>ホーム画面に追加すると、次からすぐ開けます。<br>画面の <span class="shr" aria-label="共有ボタン"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M12 15V3m0 0L8 7m4-4 4 4M6 11H5v9h14v-9h-1" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></span> 共有ボタン →「ホーム画面に追加」→「追加」</p>`;
+  else body=`<p>ホーム画面に追加すると、次からすぐ開けます。<br>ブラウザのメニュー（︙）→「ホーム画面に追加」</p>`;
+  el.innerHTML=`<div class="a2in">${body}<button class="x" data-a2="close" aria-label="案内を閉じる">×</button></div>`;
+  el.hidden=false;
+}
+window.addEventListener("beforeinstallprompt",e=>{ e.preventDefault(); installEvt=e; a2hs(); });
+window.addEventListener("appinstalled",()=>{ installEvt=null; try{localStorage.setItem("shuttle-a2hs","1")}catch(e){} a2hs(); });
+document.addEventListener("click",e=>{ const b=e.target.closest?.("[data-a2]"); if(!b) return;
+  if(b.dataset.a2==="install" && installEvt){ const ev=installEvt; installEvt=null; ev.prompt(); ev.userChoice.finally(()=>a2hs()); return; }
+  try{localStorage.setItem("shuttle-a2hs","1")}catch(_){} a2hs(); });
+a2hs();
