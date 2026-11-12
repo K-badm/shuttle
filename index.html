@@ -72,7 +72,7 @@ body.wide .wrap{max-width:1480px}
 @media (min-width:900px){
   .panes.multi{flex-direction:row;align-items:flex-start;gap:16px}
   .panes.multi .pane{flex:1 1 0;position:sticky;top:calc(var(--hdr,100px) + 8px);max-height:calc(100dvh - var(--hdr,100px) - 16px);overflow-y:auto;overscroll-behavior:contain;padding:2px 6px 24px 2px}
-  .panes.multi .pane-matches{flex-grow:1.8}
+  .panes.multi .pane-matches{flex-grow:2}
 }
 
 section.panel{display:grid;gap:16px}
@@ -228,6 +228,40 @@ body:not(.owner) .owner{display:none!important}
 .modebtn[aria-pressed="true"]{background:var(--cork);border-color:var(--cork);color:#1b1206}
 .mock{font-size:12px;color:var(--muted);text-align:center}
 @media (prefers-reduced-motion:no-preference){.match{transition:opacity .15s}}
+/* 折りたたみの欄（設定・遅刻早退・使い方）。閉じているときは1行だけ */
+.det{background:var(--surface);border:1px solid var(--line);border-radius:10px}
+.det>summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:10px;padding:10px 14px;min-height:44px}
+.det>summary::-webkit-details-marker{display:none}
+.det>summary::before{content:"▸";color:var(--muted);flex:none;width:12px}
+.det[open]>summary::before{content:"▾"}
+.det .dt{font-weight:700;font-size:15px;flex:none}
+.det .ds{font-size:13px;color:var(--muted);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.det .detb{display:grid;gap:12px;padding:4px 14px 14px;border-top:1px dashed var(--line);padding-top:12px}
+.warnc{color:var(--cork)}
+/* 次にコートに入る試合を目立たせる */
+.match.next{border-color:var(--court);box-shadow:0 0 0 2px var(--court)}
+.match.next.cross{box-shadow:0 0 0 2px var(--court),inset 4px 0 0 var(--cork)}
+body.user .match.next.cross{box-shadow:0 0 0 2px var(--court)}
+.tag.next{background:var(--court);color:var(--court-ink);margin-left:6px}
+.mh .tag.next+.tag,.mh .tag.next+.btn{margin-left:auto}
+/* 読みやすさ：組み合わせの名前と番号を大きく、集計は1行おきに色を付ける */
+.match .p{font-size:16px;gap:5px}
+.match .p .nm{font-weight:500;white-space:normal;overflow-wrap:anywhere;line-height:1.25} /* 名前は切らずに折り返す */
+.match .p .lv{min-width:26px;padding:0 3px;font-size:11px}
+.match .p .no{font-size:14px;color:var(--fg);min-width:18px}
+.match .team{gap:6px;padding:10px 8px}
+.mh{font-size:13px}
+.mh .mno{font-size:14px}
+.rhead{border-top:1px solid var(--line);padding-top:12px;margin-top:4px}
+.rhead .rn{font-size:17px}
+.rhead .rest{font-size:13px}
+.rchip{font-size:13px;padding:3px 10px}
+table{font-size:15px}
+tbody tr:nth-child(even) td{background:color-mix(in srgb,var(--bg) 55%,transparent)}
+.stats{grid-template-columns:repeat(auto-fit,minmax(112px,1fr));gap:6px}
+.stat{padding:8px 10px}
+.stat b{font-size:18px}
+.stat span{font-size:11.5px;line-height:1.35;display:block}
 /* 指で操作する画面（タブレット・スマホ）では、押す所を大きくする */
 @media (pointer:coarse){
   button.btn{min-height:44px;padding:10px 16px}
@@ -252,7 +286,7 @@ body:not(.owner) .owner{display:none!important}
     <button class="modebtn" id="modeBtn" data-act="mode" aria-pressed="false">管理者</button>
     <nav class="tabs" role="tablist">
       <button role="tab" class="admin" data-tab="members" id="t-members">メンバー</button>
-      <button role="tab" data-tab="today" id="t-today">今日</button>
+      <button role="tab" data-tab="today" id="t-today">本日</button>
       <button role="tab" class="admin owner" data-tab="admins" id="t-admins">管理者</button>
     </nav>
   </div>
@@ -262,7 +296,7 @@ body:not(.owner) .owner{display:none!important}
 <div class="popup" id="popup" role="status" aria-live="polite" hidden></div>
 <div class="wrap"><p class="mock" id="status">データはこの端末のブラウザにだけ保存されます。</p></div>
 
-<script src="app.js?v=5"></script>
+<script src="app.js?v=6"></script>
 <script type="module" src="cloud.js?v=1"></script>
 
 </body>

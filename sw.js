@@ -1,7 +1,7 @@
 // オフラインでも開けるようにするサービスワーカー。
 // 自分のファイルと Firebase の部品は「まずネット、だめなら保存してある分」で返す。
 // 中身を変えたら VERSION を上げると、古い保存分が消える。
-const VERSION = "shuttle-v20";
+const VERSION = "shuttle-v21";
 const SHELL = ["./", "index.html", "app.js", "cloud.js", "config.js", "manifest.webmanifest",
   "icons/icon-192.png", "icons/icon-512.png", "icons/apple-touch-icon.png"];
 

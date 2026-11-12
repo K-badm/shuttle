@@ -107,7 +107,7 @@ const lvChip = l => `<span class="lv lv${l}" title="${l}部">${l}部</span>`;
 const begGame = ps => ps.some(p=>p.level===5) && ps.some(p=>p.level!==5);
 const wideGame = ps => Math.max(...ps.map(p=>p.level)) - Math.min(...ps.map(p=>p.level)) >= 3;
 const MARKS = ["A","B","C","D","E","F"];
-const MAX_MEMBERS = 27; // 登録できるメンバーの上限（ユーザーの指定）
+const MAX_MEMBERS = 30; // 登録できるメンバーの上限（ユーザーの指定）
 const mkChip = k => k==null ? "" : `<span class="mk mk${k%6}" title="大会ペア${MARKS[k%6]}">${MARKS[k%6]}</span>`;
 
 /* 到着待ち（今日の参加者だが、遅刻でまだ来ていない人）。日付が変わったら空にする */
@@ -575,12 +575,10 @@ function viewLogin(){
 }
 function viewShare(){
   const url=location.href.split(/[?#]/)[0].replace(/index\.html$/,"");
-  return `<div class="box admin" style="display:grid;gap:8px">
-    <div><h3>メンバーと共有中</h3><p class="note">このURLをメンバーに送ってください。メンバーの画面では、部・NGペア・交流戦の印は出ません（データ自体を送っていません）。</p></div>
+  return det("share","メンバーと共有中","URL・ログアウト",`<p class="note">このURLをメンバーに送ってください。メンバーの画面では、部・NGペア・交流戦の印は出ません（データ自体を送っていません）。</p>
     <div class="row"><input type="text" readonly value="${esc(url)}" style="flex:1;min-width:180px;font-family:var(--f-mono);font-size:13px" aria-label="メンバー用URL">
       <button class="btn" data-act="copyUrl" data-url="${esc(url)}">URLをコピー</button>
-      <button class="btn" data-act="logout">ログアウト</button></div>
-  </div>`;
+      <button class="btn" data-act="logout">ログアウト</button></div>`,"admin");
 }
 
 /* ---------- 描画 ---------- */
@@ -613,6 +611,15 @@ function render(){
 /* 見出し（タブの帯）の高さ。並べて表示するときの各欄の高さに使う */
 function setHeaderHeight(){ const h=document.querySelector("header.top"); if(h) document.documentElement.style.setProperty("--hdr",h.offsetHeight+"px"); }
 window.addEventListener("resize",setHeaderHeight);
+/* 折りたたみの欄（設定・遅刻早退・使い方など）。組み合わせを画面の上のほうに出すため、ふだんは閉じておく。
+   開いているかどうかは端末ごとに覚え、描き直しても保つ */
+const openDet=new Set(); try{ (JSON.parse(localStorage.getItem("shuttle-open"))||[]).forEach(k=>openDet.add(String(k))) }catch(e){}
+function det(k,title,sub,body,cls=""){
+  return `<details class="det ${cls}" data-det="${k}" ${openDet.has(k)?"open":""}><summary><span class="dt">${title}</span><span class="ds">${sub}</span></summary><div class="detb">${body}</div></details>`;
+}
+document.addEventListener("toggle",e=>{ const d=e.target, k=d?.dataset?.det; if(!k) return;
+  if(d.open) openDet.add(k); else openDet.delete(k);
+  try{ localStorage.setItem("shuttle-open",JSON.stringify([...openDet])) }catch(e){} },true);
 /* 今この端末で選べる内容と、表示する内容（メンバー画面では「今日の参加者」は選べない） */
 function panesFor(){ const user=document.body.classList.contains("user"); return PANES.filter(p=>!(p.admin&&user)); }
 function shownPanes(){ const av=panesFor(); const on=av.filter(p=>panes.includes(p.k)); return on.length?on:av.filter(p=>p.k==="matches"); }
@@ -622,7 +629,7 @@ function viewToday(){
   const html={attend:viewAttend,matches:viewMatches,summary:viewSummary};
   return `<div class="paneSel" role="group" aria-label="表示する内容">
     ${av.map(p=>`<button class="pchip" data-act="pane" data-k="${p.k}" aria-pressed="${on.includes(p)}">${p.label}</button>`).join("")}
-    <span class="note">押すと表示・非表示を切り替えます。いくつでも並べられます。</span></div>
+    <span class="note">押して表示を切り替え</span></div>
   <div class="panes ${on.length>1?"multi":""}">${on.map(p=>`<div class="pane pane-${p.k}" data-pane="${p.k}">${html[p.k]()}</div>`).join("")}</div>`;
 }
 function viewMembers(){
@@ -630,7 +637,7 @@ function viewMembers(){
   const sorted=[...S.members].sort((a,b)=>a.level-b.level||a.id-b.id);
   const opts=sorted.map(m=>`<option value="${m.id}">${esc(m.name)}（${m.level}部）</option>`).join("");
   return `<section class="panel">
-  <div><h2>メンバーと部 <span class="no" style="font-size:15px">${S.members.length}/${MAX_MEMBERS}人</span></h2><p class="note">管理者だけが見る画面の想定です。1部が強く、5部が弱い。名前はタップすると直せます。</p></div>
+  <div><h2>メンバーと部 <span class="no" style="font-size:15px">${S.members.length}/${MAX_MEMBERS}人</span></h2><p class="note">管理者だけが見る画面の想定です。1部が上級者、5部が初心者です。名前はタップすると直せます。</p></div>
   <div class="box">
     ${S.members.length>=MAX_MEMBERS?`<p class="note">登録できるのは${MAX_MEMBERS}人までです。追加するときは、先にほかの人を削除してください。</p>`:`<div class="row">
       <input type="text" id="newName" placeholder="名前を追加" style="flex:1;min-width:140px">
@@ -738,10 +745,11 @@ function viewLate(P){
   const waiting=S.wait.map(byId).filter(Boolean);
   const out=S.members.filter(m=>!S.attend.includes(m.id)).sort((a,b)=>a.id-b.id);
   const pl=p=>({id:p.id,name:p.name,label:`<span class="no">${p.num}</span> ${esc(p.name)}`});
-  return `<div class="box admin" style="display:grid;gap:12px">
-    <div><h3>遅刻・早退</h3><p class="note">${done
+  const nlog=dayLog().length;
+  const sub=[waiting.length?`<b class="warnc">到着待ち ${waiting.length}人</b>`:"", nlog?`記録 ${nlog}件`:"", !waiting.length&&!nlog?"タップして開く":""].filter(Boolean).join("・");
+  return det("late","遅刻・早退",sub,`<p class="note">${done
       ? `第${done}ラウンドまで終了。終わったラウンドはそのままにして、第${done+1}ラウンドから組み直します。`
-      : "まだどのラウンドも終わっていないので、全体を組み直します。ラウンドが終わったら「終了」を押してください。"}</p></div>
+      : "まだどのラウンドも終わっていないので、全体を組み直します。ラウンドが終わったら「終了」を押してください。"}</p>
     <div style="display:grid;gap:6px"><span class="note">遅刻する人（今日の参加者から選ぶ。来るまで試合に入りません）</span>
       <div class="row">${msel("mLate",P.map(pl))}<button class="btn" data-act="lateMark">遅刻にする</button></div></div>
     ${waiting.length?`<div class="row" style="gap:6px"><span class="note">到着待ち：</span>${waiting.map(m=>`<span class="ngmark" style="background:var(--cork-soft);color:var(--cork)">${esc(m.name)}</span>`).join("")}</div>`:""}
@@ -753,8 +761,7 @@ function viewLate(P){
     <p class="note">到着待ちの人が来なくなったときは、「今日の参加者」でチェックを外してください。</p>
     ${viewLog()}
     ${done?`<div class="row"><button class="btn" data-act="resetDay">進行をリセット（最初から組み直す）</button></div>`:""}
-    ${done&&done>=R?'<p class="note">全ラウンドが終わりました。</p>':""}
-  </div>`;
+    ${done&&done>=R?'<p class="note">全ラウンドが終わりました。</p>':""}`,"admin");
 }
 function viewMatches(){
   ensure();
@@ -767,24 +774,25 @@ function viewMatches(){
   const sel=dnd.sel;
   const pl=(p,ri,g,slot)=>`<div class="p ${String(p.id)===focusId?"hl":""} ${canEdit(ri,g)?"drag":""} ${sel===`${ri}|${slot}`?"picked":""}" ${canEdit(ri,g)?`data-slot="${ri}|${slot}"`:""}><span class="no">${p.num}</span>${lvChip(p.level)}<span class="nm">${esc(p.name)}</span>${mkChip(p.mk)}</div>`;
   return `<section class="panel">
-  <h2>組み合わせ</h2>
-  <div class="box admin"><div class="cfg">
+  <div class="row"><h2 style="margin-right:auto">組み合わせ</h2><button class="btn primary admin" data-act="regen">${done?"残りを組み直す":"組み直す"}</button></div>
+  ${det("cfg","設定",`${cfg.matches}試合・${cfg.courts}面・交流戦 ${cfg.cross}回/人`,`<div class="cfg">
     <label for="cfgM">試合数<input type="number" id="cfgM" min="1" max="80" value="${cfg.matches}"></label>
     <label for="cfgC">コート数<input type="number" id="cfgC" min="1" max="8" value="${cfg.courts}"></label>
     <label for="cfgX">交流戦の目安（回/人）<input type="number" id="cfgX" min="0" max="5" step="0.5" value="${cfg.cross}"></label>
-    <button class="btn primary" data-act="regen">${done?"残りを組み直す":"組み直す"}</button>
-  </div></div>
+  </div><p class="note">数字を変えたら「組み直す」を押してください。</p>`,"admin")}
   ${viewLate(P)}
   ${cloud.on&&cloud.admin?viewShare():""}
   ${cloud.on&&!cloud.admin&&S.day&&S.day.date!==TODAY?`<p class="note">${esc(S.day.date)} の組み合わせです。今日の分はまだ出ていません。</p>`:""}
   ${!schedule.rounds.length&&cloud.on&&!cloud.admin?`<p class="note">${cloud.ready?"まだ組み合わせが出ていません。管理者が作ると、ここに出ます。":"読み込み中…"}</p>`:
-    P.length<4&&!schedule.rounds.length?'<p class="note">参加者が4人以上いると組み合わせを作れます。</p>':statsStrip()+`
+    P.length<4&&!schedule.rounds.length?'<p class="note">参加者が4人以上いると組み合わせを作れます。</p>':(shownPanes().some(p=>p.k==="summary")?"":statsStrip())+`
   <div class="row"><label for="focus" class="note">選手を強調</label>
     <select id="focus" style="flex:1;max-width:260px"><option value="">（なし）</option>${P.map(p=>`<option value="${p.id}" ${String(p.id)===focusId?"selected":""}>${p.num} ${esc(p.name)}</option>`).join("")}</select>
-    <span class="legend"><span class="it admin"><span class="tag">交流戦</span>1・2部と4・5部を混ぜた試合、または部の差が3以上の人（味方・相手とも）がいる試合</span><span class="it"><span class="tag pr">ペア練</span>大会ペアが味方で出る試合</span></span></div>
-  ${total?`<div class="progress">${started?`<span class="pill">第${started}試合まで開始</span>${started<total?`<span>次は第${started+1}試合</span>`:"<span>全試合が始まりました</span>"}`:"<span>まだ試合は始まっていません</span>"}</div>
-  <p class="note admin">試合がコートに入ったら、その試合の「開始」を押してください。グレーになり、メンバーの画面にも同じように出ます。</p>
-  <p class="note admin">組み合わせを手で直すときは、名前をつかんで（スマホは少し長押しして）入れ替えたい人の上に落とします。2人を続けてタップしても入れ替わります。同じラウンドの中で、まだ始まっていない試合と休みの人が対象です。</p>`:""}
+</div>
+  ${total?`<div class="progress">${started?`<span class="pill">第${started}試合まで開始</span>${started<total?`<span>次は第${started+1}試合</span>`:"<span>全試合が始まりました</span>"}`:"<span>まだ試合は始まっていません</span>"}</div>`:""}
+  ${det("help","印の意味と使い方","タップして開く",`<div class="legend"><span class="it"><span class="tag pr">ペア練</span>大会ペアが味方で出る試合</span><span class="it"><span class="tag next">次</span>次にコートに入る試合</span></div>
+    <div class="legend admin"><span class="it"><span class="tag">交流戦</span>1・2部と4・5部を混ぜた試合、または部の差が3以上の人（味方・相手とも）がいる試合</span></div>
+    <p class="note admin">試合がコートに入ったら、その試合の「開始」を押してください。グレーになり、メンバーの画面にも同じように出ます。</p>
+    <p class="note admin">組み合わせを手で直すときは、名前をつかんで（スマホは少し長押しして）入れ替えたい人の上に落とします。2人を続けてタップしても入れ替わります。同じラウンドの中で、まだ始まっていない試合と休みの人が対象です。</p>`)}
   ${schedule.rounds.map((r,ri)=>`<div class="round ${ri<done?"done":""}">
     <div class="rhead"><span class="rn">第${ri+1}ラウンド</span>
       ${ri<done?'<span class="tag ok">終了</span>':""}
@@ -795,9 +803,9 @@ function viewMatches(){
     <div class="courts">${r.games.map((g,gi)=>{
       const has=focusId&&g.teams.flat().some(p=>String(p.id)===focusId);
       const sum=t=>t[0].level+t[1].level;
-      const on=g.no<=started;
-      return `<div class="match ${g.cross?"cross":""} ${on?"started":""} ${focusId&&!has?"dim":""}">
-        <div class="mh"><span class="mno">第${g.no}試合</span><span>${courtName(g.court)}</span>
+      const on=g.no<=started, next=ri>=done&&g.no===started+1;
+      return `<div class="match ${g.cross?"cross":""} ${on?"started":""} ${next?"next":""} ${focusId&&!has?"dim":""}">
+        <div class="mh"><span class="mno">第${g.no}試合</span><span>${courtName(g.court)}</span>${next?'<span class="tag next">次</span>':""}
         ${g.bad.length?'<span class="tag bad admin">NG同席</span>':""}${g.cross?'<span class="tag admin">交流戦</span>':""}${g.pm.length?`<span class="tag pr">ペア練 ${g.pm.map(mkChip).join("")}</span>`:""}
         ${on&&!admin?'<span class="tag">開始済み</span>':""}
         ${admin&&g.no===started+1?`<button class="btn go admin" data-act="startGame" data-no="${g.no}">開始</button>`:""}
@@ -829,13 +837,14 @@ function viewSummary(){
   const playedN=games.filter(played).length;
   const nowVals=schedule.P.map(p=>now[p.id]||0), nmin=nowVals.length?Math.min(...nowVals):0, nmax=nowVals.length?Math.max(...nowVals):0;
   return `<section class="panel">
-  <div><h2>集計</h2><p class="note">「今まで」は、もうコートに入った試合の数（「開始」を押した試合まで）です。「予定」は今日の全部の試合の数です。
-    行をタップすると、組み合わせでその人の試合を強調します。マス目は各ラウンドの出場で、濃いマスが入った試合、薄いマスがこれからの試合です<span class="admin">（橙は交流戦）</span>。
-    ${showB?'<span class="admin">「初心者との試合」は、5部（初心者）の人がいる試合に入った回数で、交流戦とは別に数えています（5部の人は「–」）。</span>':""}</p></div>
+  <h2>集計</h2>
+  ${det("sumhelp","見方","今まで・予定・マス目の意味",`<p class="note">「今まで」は、もうコートに入った試合の数（「開始」を押した試合まで）です。「予定」は今日の全部の試合の数です。橙の数字は、今いちばん少ない人です。</p>
+    <p class="note">行をタップすると、組み合わせでその人の試合を強調します。マス目は各ラウンドの出場で、濃いマスが入った試合、薄いマスがこれからの試合です<span class="admin">（橙は交流戦）</span>。</p>
+    ${showB?'<p class="note admin">「初心者との試合」は、5部（初心者）の人がいる試合に入った回数で、交流戦とは別に数えています（5部の人は「–」）。</p>':""}`)}
   ${games.length?`<div class="progress"><span class="pill">今まで ${playedN}試合 / 全${games.length}試合</span>${playedN?`<span>今いる人の今までの試合数：${nmin===nmax?nmin:nmin+"〜"+nmax}回</span>`:"<span>まだ試合は始まっていません</span>"}</div>`:""}
   ${schedule.P.length<4&&!games.length?"":statsStrip()}
   <div class="tablewrap"><table>
-    <thead><tr><th>番号</th><th>名前</th><th class="admin">部</th><th style="text-align:right">今まで</th><th style="text-align:right">予定</th><th class="admin" style="text-align:right">交流戦</th>${showB?'<th class="admin" style="text-align:right">初心者との試合</th>':""}<th style="text-align:right">ペア練</th><th>ラウンド別</th></tr></thead>
+    <thead><tr><th>番号</th><th>名前</th><th class="admin">部</th><th style="text-align:right">今まで</th><th style="text-align:right">予定</th><th class="admin" style="text-align:right">交流戦</th>${showB?'<th class="admin" style="text-align:right">初心者と</th>':""}<th style="text-align:right">ペア練</th><th>ラウンド別</th></tr></thead>
     <tbody>${P.map(p=>{
       const mine=games.filter(g=>g.teams.flat().some(q=>q.id===p.id));
       const pips=[...Array(R)].map((_,ri)=>{const g=mine.find(x=>x.ri===ri);return `<span class="pip ${g?(g.cross?"x":"on"):""} ${g&&!played(g)?"fut":""}"></span>`}).join("");
