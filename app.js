@@ -102,6 +102,9 @@ const byId = id => S.members.find(m=>m.id===id);
 const isNg = (a,b) => S.ng.some(([x,y])=>(x===a&&y===b)||(x===b&&y===a));
 const lvChip = l => `<span class="lv lv${l}" title="${l}部">${l}部</span>`;
 /* 部の差が3以上の人（味方でも相手でも）が同じ試合にいれば、交流戦として数える（ユーザーの指定） */
+/* 5部（初心者）の相手：5部の人がいる試合に、5部でない人が入った回数を、交流戦とは別に数える（ユーザーの指定）。
+   5部は4部とも差があり、相手をするのは4部の人にも負担になるので、5部でない人の間でならす */
+const begGame = ps => ps.some(p=>p.level===5) && ps.some(p=>p.level!==5);
 const wideGame = ps => Math.max(...ps.map(p=>p.level)) - Math.min(...ps.map(p=>p.level)) >= 3;
 const MARKS = ["A","B","C","D","E","F"];
 const MAX_MEMBERS = 27; // 登録できるメンバーの上限（ユーザーの指定）
@@ -152,8 +155,8 @@ function buildOnce(P, cfg, pairs, fixed=[], off={}){
   let crossTotal = (strong.length>=2 && weak.length>=2)
     ? Math.round(cfg.cross*(strong.length+weak.length)/4) : 0;
   crossTotal = Math.min(crossTotal, M);
-  const cnt={}, xc={}, last={}, meet={};
-  P.forEach(p=>{cnt[p.id]=off[p.id]||0;xc[p.id]=0;last[p.id]=-9});
+  const cnt={}, xc={}, bc={}, last={}, meet={};
+  P.forEach(p=>{cnt[p.id]=off[p.id]||0;xc[p.id]=0;bc[p.id]=0;last[p.id]=-9});
   // 遅刻者は、時間どおりに来た人より1回少なくてもよい。比べるときに 0.5 回分を足しておく
   // （同じ回数なら時間どおりの人を先に出し、ならすときも遅刻者の −1 までは許す）
   const late=new Set(Object.keys(off).map(Number));
@@ -173,7 +176,8 @@ function buildOnce(P, cfg, pairs, fixed=[], off={}){
   fixed.forEach((rd,r)=>rd.games.forEach(g=>{
     const ps=g.teams.flat();
     for(let a=0;a<4;a++)for(let b=a+1;b<4;b++) meet[mk(ps[a].id,ps[b].id)]=mt(ps[a].id,ps[b].id)+1;
-    for(const p of ps) if(cnt[p.id]!==undefined){cnt[p.id]++;real[p.id]++;last[p.id]=r;if(g.cross)xc[p.id]++}
+    const gb=begGame(ps);
+    for(const p of ps) if(cnt[p.id]!==undefined){cnt[p.id]++;real[p.id]++;last[p.id]=r;if(g.cross)xc[p.id]++;if(gb&&p.level!==5)bc[p.id]++}
     g.pm.forEach(k=>{const j=pairs.findIndex(pr=>pr.k===k); if(j>=0) pc[j]++});
     if(g.cross) crossDone++;
     gi++;
@@ -232,7 +236,7 @@ function buildOnce(P, cfg, pairs, fixed=[], off={}){
         }
         if(f.length) cands=f;
       }
-      let best=null,bc=Infinity;
+      let best=null,bcost=Infinity;
       for(const g of cands){
         let cost=0;
         for(const p of g){ cost+=ac(p.id)*ac(p.id)*6; if(last[p.id]===r-1) cost+=2; }
@@ -249,8 +253,10 @@ function buildOnce(P, cfg, pairs, fixed=[], off={}){
           cost+=sp*sp*9;
           if(Math.min(...ls)<=2 && Math.max(...ls)>=4) cost+=60;
         }
+        // 5部の相手が同じ人に片寄らないように（もう相手をした回数が多い人ほど選びにくくする）
+        if(begGame(g)) for(const p of g) if(p.level!==5) cost+=bc[p.id]*bc[p.id]*10;
         cost+=Math.random();
-        if(cost<bc){bc=cost;best=g}
+        if(cost<bcost){bcost=cost;best=g}
       }
       // ペア分け
       const [a,b,c2,d]=best;
@@ -274,7 +280,8 @@ function buildOnce(P, cfg, pairs, fixed=[], off={}){
       ng+=bad.length;
       const isX = cross || wideGame(best); // 交流戦の枠、または部の差が3以上の人がいる試合
       if(isX) crossDone++;
-      for(const p of best){cnt[p.id]++;real[p.id]++;last[p.id]=r;used.add(p.id);if(isX)xc[p.id]++}
+      const isB=begGame(best);
+      for(const p of best){cnt[p.id]++;real[p.id]++;last[p.id]=r;used.add(p.id);if(isX)xc[p.id]++;if(isB&&p.level!==5)bc[p.id]++}
       games.push({no:i+1,court:c,cross:isX,teams:pair,bad,pm});
       gi++;
     }
@@ -372,6 +379,11 @@ function buildOnce(P, cfg, pairs, fixed=[], off={}){
   const varc=vals.reduce((s,v)=>s+(v-mean)**2,0);
   const sw=P.filter(p=>p.level<=2||p.level>=4);
   const xdev=sw.reduce((s,p)=>s+(xc[p.id]-cfg.cross)**2,0);
+  // 5部の相手をした回数は、入れ替えのあとの組み合わせで数え直し、5部でない人の間のばらつきをスコアに足す
+  P.forEach(p=>bc[p.id]=0);
+  rounds.forEach(rd=>rd.games.forEach(g=>{ const ps=g.teams.flat(); if(begGame(ps)) ps.forEach(p=>{ if(p.level!==5&&bc[p.id]!==undefined) bc[p.id]++ }); }));
+  const nb=P.filter(p=>p.level!==5), bm=nb.length?nb.reduce((s,p)=>s+bc[p.id],0)/nb.length:0;
+  const bdev=nb.reduce((s,p)=>s+(bc[p.id]-bm)**2,0);
   const rep=Object.values(meet).reduce((s,v)=>s+(v>1?(v-1)**2:0),0);
   const pdev=pc.reduce((s,v)=>s+(v<3?(3-v)*2000:0)+(v>4?(v-4)*300:0)+(v-T)**2*80,0);
   const ppc={}; pairs.forEach((pr,j)=>{ppc[pr.a]=pc[j];ppc[pr.b]=pc[j]});
@@ -384,8 +396,8 @@ function buildOnce(P, cfg, pairs, fixed=[], off={}){
     for(let k=0;k<3;k++){ const part=sps.slice(Math.floor(k*sps.length/3),Math.floor((k+1)*sps.length/3));
       const m=part.reduce((a,b)=>a+b,0)/part.length; lump+=(m-all)**2*part.length; }
   }
-  return {rounds,cnt,xc,ng,crossTotal,pc,ppc,
-    score:ng*1000+varc*400+xdev*30+rep*2+pdev+lump*60};
+  return {rounds,cnt,xc,bc,ng,crossTotal,pc,ppc,
+    score:ng*1000+varc*400+xdev*30+bdev*20+rep*2+pdev+lump*60};
 }
 /* 保存用にIDだけにする／保存したものを選手の情報に戻す */
 function dehydrate(rounds){
@@ -402,15 +414,16 @@ function hydrate(rounds,P){
 }
 /* 実際の出場回数などを数える（早退した人も含む） */
 function tally(rounds,pairs){
-  const cnt={}, xc={}, ppc={}; let ng=0;
+  const cnt={}, xc={}, bc={}, ppc={}; let ng=0;
   const pc=pairs.map(pr=>0);
   for(const rd of rounds) for(const g of rd.games){
-    for(const p of g.teams.flat()){cnt[p.id]=(cnt[p.id]||0)+1; if(g.cross) xc[p.id]=(xc[p.id]||0)+1}
+    const ps=g.teams.flat(), gb=begGame(ps);
+    for(const p of ps){cnt[p.id]=(cnt[p.id]||0)+1; if(g.cross) xc[p.id]=(xc[p.id]||0)+1; if(gb&&p.level!==5) bc[p.id]=(bc[p.id]||0)+1}
     ng+=g.bad.length;
     g.pm.forEach(k=>{const j=pairs.findIndex(pr=>pr.k===k); if(j>=0) pc[j]++});
   }
   pairs.forEach((pr,j)=>{ppc[pr.a]=pc[j];ppc[pr.b]=pc[j]});
-  return {cnt,xc,ng,pc,ppc};
+  return {cnt,xc,bc,ng,pc,ppc};
 }
 function generate(){
   const pairs=todayPairs();
@@ -451,7 +464,7 @@ function generate(){
 function ensure(){
   if(schedule && !stale) return;
   if(memberOnly() && !S.day?.rounds.length){ // メンバー画面ではここで組まない
-    schedule={rounds:[],cnt:{},xc:{},ng:0,pc:[],ppc:{},P:players(),pairs:[]}; return;
+    schedule={rounds:[],cnt:{},xc:{},bc:{},ng:0,pc:[],ppc:{},P:players(),pairs:[]}; return;
   }
   if(stale || !S.day || !S.day.rounds.length) return generate();
   const P=players(), pairs=todayPairs(), rounds=hydrate(S.day.rounds,P);
@@ -693,10 +706,14 @@ function statsStrip(){
   const sw=P.filter(p=>p.level<=2||p.level>=4);
   const xa=sw.length? (sw.reduce((s,p)=>s+(schedule.xc[p.id]||0),0)/sw.length):0;
   const mn=Math.min(...c), mx=Math.max(...c);
+  // 5部の相手（5部と、5部でない人の両方がいる日だけ出す）
+  const nb=P.filter(p=>p.level!==5), bv=nb.map(p=>schedule.bc[p.id]||0);
+  const showB=nb.length>0&&nb.length<P.length, bmn=showB?Math.min(...bv):0, bmx=showB?Math.max(...bv):0;
   return `<div class="stats">
     <div class="stat"><b>${schedule.rounds.reduce((s,r)=>s+r.games.length,0)}</b><span>試合</span></div>
     <div class="stat ${mx-mn<=1?"good":""}"><b>${mn===mx?mn:mn+"〜"+mx}</b><span>1人あたり試合数${Object.keys(joined).length?"（遅刻者は1回少ないことがあります）":""}</span></div>
     <div class="stat admin"><b>${xa.toFixed(1)}</b><span>交流戦/人（1・2部と4・5部）</span></div>
+    ${showB?`<div class="stat admin"><b>${bmn===bmx?bmn:bmn+"〜"+bmx}</b><span>初心者との試合（5部以外の人、回）</span></div>`:""}
     <div class="stat admin ${schedule.ng?"bad":"good"}"><b>${schedule.ng}</b><span>NGペアの同席</span></div>
     ${schedule.pairs.length?`<div class="stat"><b style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">${schedule.pairs.map((p,j)=>`<span style="display:inline-flex;gap:3px;align-items:center">${mkChip(p.k)}${schedule.pc[j]}</span>`).join("")}</b><span>大会ペアのペア練（回）</span></div>`:""}
   </div>`;
@@ -804,6 +821,7 @@ function viewSummary(){
   const arr=p=>{ const t=arrivedAt(p.id); return t?`・${hhmm(t)}着`:""; };
   const st=p=>!inP.has(p.id)?' <span class="note">（早退）</span>':joined[p.id]===0?` <span class="note">（遅刻${arr(p)}）</span>`:joined[p.id]!=null?` <span class="note">（第${joined[p.id]+1}Rから${arr(p)}）</span>`:"";
   const R=schedule.rounds.length;
+  const showB=schedule.P.some(p=>p.level===5)&&schedule.P.some(p=>p.level!==5); // 5部の相手の欄を出すか
   // 今までに入った試合：「開始」を押した試合と、終わったラウンドの試合
   const started=S.day?.started||0, done=S.day?.done||0;
   const played=g=>g.no<=started||g.ri<done;
@@ -812,17 +830,18 @@ function viewSummary(){
   const nowVals=schedule.P.map(p=>now[p.id]||0), nmin=nowVals.length?Math.min(...nowVals):0, nmax=nowVals.length?Math.max(...nowVals):0;
   return `<section class="panel">
   <div><h2>集計</h2><p class="note">「今まで」は、もうコートに入った試合の数（「開始」を押した試合まで）です。「予定」は今日の全部の試合の数です。
-    行をタップすると、組み合わせでその人の試合を強調します。マス目は各ラウンドの出場で、濃いマスが入った試合、薄いマスがこれからの試合です<span class="admin">（橙は交流戦）</span>。</p></div>
+    行をタップすると、組み合わせでその人の試合を強調します。マス目は各ラウンドの出場で、濃いマスが入った試合、薄いマスがこれからの試合です<span class="admin">（橙は交流戦）</span>。
+    ${showB?'<span class="admin">「初心者との試合」は、5部（初心者）の人がいる試合に入った回数で、交流戦とは別に数えています（5部の人は「–」）。</span>':""}</p></div>
   ${games.length?`<div class="progress"><span class="pill">今まで ${playedN}試合 / 全${games.length}試合</span>${playedN?`<span>今いる人の今までの試合数：${nmin===nmax?nmin:nmin+"〜"+nmax}回</span>`:"<span>まだ試合は始まっていません</span>"}</div>`:""}
   ${schedule.P.length<4&&!games.length?"":statsStrip()}
   <div class="tablewrap"><table>
-    <thead><tr><th>番号</th><th>名前</th><th class="admin">部</th><th style="text-align:right">今まで</th><th style="text-align:right">予定</th><th class="admin" style="text-align:right">交流戦</th><th style="text-align:right">ペア練</th><th>ラウンド別</th></tr></thead>
+    <thead><tr><th>番号</th><th>名前</th><th class="admin">部</th><th style="text-align:right">今まで</th><th style="text-align:right">予定</th><th class="admin" style="text-align:right">交流戦</th>${showB?'<th class="admin" style="text-align:right">初心者との試合</th>':""}<th style="text-align:right">ペア練</th><th>ラウンド別</th></tr></thead>
     <tbody>${P.map(p=>{
       const mine=games.filter(g=>g.teams.flat().some(q=>q.id===p.id));
       const pips=[...Array(R)].map((_,ri)=>{const g=mine.find(x=>x.ri===ri);return `<span class="pip ${g?(g.cross?"x":"on"):""} ${g&&!played(g)?"fut":""}"></span>`}).join("");
       const nn=now[p.id]||0, low=playedN&&inP.has(p.id)&&nn===nmin&&nmin<nmax;
       return `<tr class="click" data-act="focusP" data-id="${p.id}" tabindex="0"><td class="n">${p.num}</td><td>${esc(p.name)}${st(p)}</td><td class="admin">${lvChip(p.level)}</td>
-      <td class="n now ${low?"low":""}" ${low?'title="今いちばん少ない人"':""}>${nn}</td><td class="n">${schedule.cnt[p.id]||0}</td><td class="n admin">${schedule.xc[p.id]||0}</td><td class="n">${p.mk==null?"–":mkChip(p.mk)+" "+(schedule.ppc[p.id]||0)}</td><td><div class="pips">${pips}</div></td></tr>`}).join("")}</tbody>
+      <td class="n now ${low?"low":""}" ${low?'title="今いちばん少ない人"':""}>${nn}</td><td class="n">${schedule.cnt[p.id]||0}</td><td class="n admin">${schedule.xc[p.id]||0}</td>${showB?`<td class="n admin">${p.level===5?"–":(schedule.bc[p.id]||0)}</td>`:""}<td class="n">${p.mk==null?"–":mkChip(p.mk)+" "+(schedule.ppc[p.id]||0)}</td><td><div class="pips">${pips}</div></td></tr>`}).join("")}</tbody>
   </table></div>
   </section>`;
 }
