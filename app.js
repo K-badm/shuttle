@@ -545,7 +545,7 @@ function memberState(pub){
 }
 let pushT=null, pushMsg="", pushBusy=false;
 /* 保存の理由（次の保存で記録に残す）。操作のたびに足し、何もないのに保存したら「自動」と記録する */
-const APP_V=11;
+const APP_V=12;
 const WHY={setLv:"部の変更",delMember:"メンバー削除",addMember:"メンバー追加",addNg:"NGペアの変更",delNg:"NGペアの変更",
   addTp:"大会ペアの変更",delTp:"大会ペアの変更",clearTp:"大会ペアの変更",allOn:"参加者の変更",allOff:"参加者の変更",
   regen:"組み直す",doneRound:"ラウンド終了",undoRound:"終了の取り消し",startGame:"開始",unstartGame:"開始の取り消し",
@@ -565,7 +565,9 @@ async function pushNow(){
     pushMsg="保存中…"; showStatus();
     const at=Math.max(Date.now(),(cloud.baseAt||0)+1);
     S.hist=[{by:cloud.email,why:[...whys].join("・")||"自動",at,v:APP_V},...(S.hist||[])].slice(0,20); whys.clear();
-    const r=await window.cloudApi.push({json:JSON.stringify(S),at},{json:JSON.stringify(publicState()),at},cloud.baseAt||0);
+    // v（アプリの版）と d（今日の日付 yyyymmdd）を付ける。Firestore のルールで、古い版や日付の違う端末からの保存を断る
+    const v=APP_V, dd=+TODAY.replace(/\./g,"");
+    const r=await window.cloudApi.push({json:JSON.stringify(S),at,v,d:dd},{json:JSON.stringify(publicState()),at,v,d:dd},cloud.baseAt||0);
     if(r?.conflict){ pushBusy=false; adoptPrivate(r.data,"ほかの管理者が先に変更していたため、その内容を表示しています。必要ならもう一度操作してください。"); return; }
     cloud.baseAt=at; pushMsg="";
   }catch(e){

@@ -24,13 +24,22 @@ if (FB) {
       },
       // サーバーの版が baseAt より新しければ書かずに、その版を返す（古い内容での上書きを防ぐ）。
       // ネットにつながらないときは失敗する（端末に溜めて、あとで古い内容を送ってしまわないように）
-      push: (priv, pub, baseAt) => F.runTransaction(db, async tx => {
-        const cur = await tx.get(privRef);
-        const at = cur.exists() ? (cur.data().at || 0) : 0;
-        if (cur.exists() && at > baseAt) return { conflict: true, data: cur.data() };
-        tx.set(privRef, priv); tx.set(pubRef, pub);
-        return { conflict: false };
-      }),
+      push: async (priv, pub, baseAt) => {
+        const run = (a, b) => F.runTransaction(db, async tx => {
+          const cur = await tx.get(privRef);
+          const at = cur.exists() ? (cur.data().at || 0) : 0;
+          if (cur.exists() && at > baseAt) return { conflict: true, data: cur.data() };
+          tx.set(privRef, a); tx.set(pubRef, b);
+          return { conflict: false };
+        });
+        try { return await run(priv, pub); }
+        catch (e) {
+          // ルールがまだ古い（v・d を受け付けない）ときだけ、v・d なしで送り直す
+          if (e.code !== "permission-denied") throw e;
+          const strip = o => ({ json: o.json, at: o.at });
+          return run(strip(priv), strip(pub));
+        }
+      },
       refreshPublic: watchPublic,
       addAdmin: email => F.setDoc(F.doc(db, "admins", email), { addedAt: Date.now() }),
       removeAdmin: email => F.deleteDoc(F.doc(db, "admins", email)),
