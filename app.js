@@ -41,7 +41,9 @@ function clean(raw){
     wait:ids(raw.wait), waitDate:date(raw.waitDate), arrived:ids(raw.arrived), arrivedDate:date(raw.arrivedDate),
     log:arr(raw.log,1000).filter(e=>e&&["wait","arrive","join","leave","absent"].includes(e.type)&&id(e.id)!==null)
       .map(e=>({type:e.type,id:id(e.id),at:int(e.at,0,8.64e15,0),game:int(e.game,0,100000,0),done:int(e.done,0,100000,0)})),
-    logDate:date(raw.logDate), day:null};
+    logDate:date(raw.logDate), day:null,
+    // 保存の記録（誰が・いつ・何の操作で）。新しい順に20件まで
+    hist:arr(raw.hist,20).filter(e=>e&&typeof e==="object").map(e=>({by:str(e.by,80),why:str(e.why,60),at:int(e.at,0,8.64e15,0),v:int(e.v,0,9999,0)}))};
   const dy=raw.day;
   if(dy && typeof dy==="object"){
     let ok=true;
@@ -195,17 +197,24 @@ function buildOnce(P, cfg, pairs, fixed=[], off={}){
     if(bandGame(ps)){ sinceBand=0; bandDone[bandOf(ps[0])]++; } else sinceBand++;
     gi++;
   }));
-  for(let r=fixed.length; gi<M; r++){
-    const used=new Set(), games=[];
+  // 最後の fixed ラウンドが途中まで（始まった試合だけ）なら、そのラウンドの残りのコートから組む
+  const part=fixed.length && fixed[fixed.length-1].partial ? fixed[fixed.length-1] : null;
+  const nf=fixed.length-(part?1:0); // 丸ごと残すラウンドの数（入れ替えでの修正はこれより後だけ）
+  if(part) part.games.forEach(g=>g._fx=true);
+  for(let r=nf; gi<M; r++){
+    const cont=part && r===nf; // 途中のラウンドの続き
+    const used=new Set(cont?part.games.flatMap(g=>g.teams.flat().map(p=>p.id)):[]), games=cont?part.games.slice():[];
+    const c0=games.length;
+    if(c0>=C) { rounds[r]={games,rest:P.filter(p=>!used.has(p.id))}; continue; }
     const open=allPlayed(); roundOpen[r]=open;
     const ok=p=>open||!late.has(p.id); // まだ全員が1回入っていなければ、遅刻者はこのラウンドは休み
     // このラウンドに必ず出す人：試合数がいちばん少ない人たち（コートに入れる人数の枠に収まる分）。
     // 部の差が大きくて組みにくい人も後回しにせず、毎ラウンド順番に出す（終盤に試合や部の差が固まらないように）
-    const pool=P.filter(ok), slots=Math.min(C,M-gi)*4;
+    const pool=P.filter(p=>ok(p)&&!used.has(p.id)), slots=Math.min(C-c0,M-gi)*4;
     const acs=pool.map(p=>ac(p.id)).sort((a,b)=>a-b);
     const cut=acs.length>slots ? acs[slots-1] : Infinity;
     const must=new Set(pool.filter(p=>ac(p.id)<cut).map(p=>p.id));
-    for(let c=0;c<C && gi<M;c++){
+    for(let c=c0;c<C && gi<M;c++){
       const i=gi;
       let avail=P.filter(p=>!used.has(p.id)&&ok(p));
       if(avail.length<4) avail=P.filter(p=>!used.has(p.id)); // 人が足りないときだけは遅刻者も入れる
@@ -318,6 +327,7 @@ function buildOnce(P, cfg, pairs, fixed=[], off={}){
       games.push({no:i+1,court:c,cross:isX,teams:pair,bad,pm});
       gi++;
     }
+    if(cont){ rounds[r]={games,rest:P.filter(p=>!used.has(p.id))}; continue; }
     if(!games.length) break;
     rounds.push({games,rest:P.filter(p=>!used.has(p.id))});
   }
@@ -330,7 +340,8 @@ function buildOnce(P, cfg, pairs, fixed=[], off={}){
     let done=false;
     const lows=ids.filter(id=>ac(id)<ac(ids[ids.length-1])-1), highs=ids.filter(id=>ac(id)>ac(ids[0])+1);
     let bestSw=null,bs=Infinity;
-    for(const rd of rounds.slice(fixed.length)) for(const g of rd.games) for(const t of g.teams) for(let s=0;s<2;s++){
+    for(const rd of rounds.slice(nf)) for(const g of rd.games) for(const t of g.teams) for(let s=0;s<2;s++){
+      if(g._fx) continue;
       const ri=rounds.indexOf(rd);
       const h=t[s]; if(!highs.includes(h.id)) continue;
       if(sameP(t[0].id,t[1].id) && g.pm.length) continue;
@@ -354,12 +365,12 @@ function buildOnce(P, cfg, pairs, fixed=[], off={}){
   // 2人ともそのラウンドに出ているので、試合数は変わらない
   for(let it=0;it<30;it++){
     let bestSw=null,bs=Infinity;
-    for(const rd of rounds.slice(fixed.length)) for(const g of rd.games){
-      if(!g.cross||g.pm.length) continue;
+    for(const rd of rounds.slice(nf)) for(const g of rd.games){
+      if(!g.cross||g.pm.length||g._fx) continue;
       for(const t of g.teams) for(let s=0;s<2;s++){
         const h=t[s]; if(xc[h.id]<2) continue;
         for(const g2 of rd.games){
-          if(g2===g||g2.cross||g2.pm.length) continue;
+          if(g2===g||g2.cross||g2.pm.length||g2._fx) continue;
           for(const t2 of g2.teams) for(let s2=0;s2<2;s2++){
             const l=t2[s2]; if(xc[l.id]!==0||cls(l)==="M"||cls(l)!==cls(h)) continue;
             const o1=g.teams.flat().filter(p=>p!==h), o2=g2.teams.flat().filter(p=>p!==l);
@@ -374,9 +385,9 @@ function buildOnce(P, cfg, pairs, fixed=[], off={}){
     if(!bestSw){
       // 同じラウンドで見つからなければ、2つのラウンドで入れ替える：
       // ラウンドAの交流戦で h（2回以上）と休みの l（0回）を入れ替え、ラウンドBのふつうの試合で l と休みの h を入れ替える
-      const newR=rounds.slice(fixed.length);
+      const newR=rounds.slice(nf);
       for(const rA of newR) for(const g of rA.games){
-        if(!g.cross||g.pm.length) continue;
+        if(!g.cross||g.pm.length||g._fx) continue;
         for(const t of g.teams) for(let s=0;s<2;s++){
           const h=t[s]; if(xc[h.id]<2) continue;
           for(const l of rA.rest){
@@ -386,7 +397,7 @@ function buildOnce(P, cfg, pairs, fixed=[], off={}){
             for(const rB of newR){
               if(rB===rA || !rB.rest.some(p=>p.id===h.id)) continue;
               for(const g2 of rB.games){
-                if(g2.cross||g2.pm.length) continue;
+                if(g2.cross||g2.pm.length||g2._fx) continue;
                 for(const t2 of g2.teams) for(let s2=0;s2<2;s2++){
                   if(t2[s2].id!==l.id) continue;
                   const o2=g2.teams.flat().filter(p=>p.id!==l.id);
@@ -422,7 +433,7 @@ function buildOnce(P, cfg, pairs, fixed=[], off={}){
   const pdev=pc.reduce((s,v)=>s+(v<3?(3-v)*2000:0)+(v>4?(v-4)*300:0)+(v-T)**2*80,0);
   const ppc={}; pairs.forEach((pr,j)=>{ppc[pr.a]=pc[j];ppc[pr.b]=pc[j]});
   // 部の差が序盤・中盤・終盤のどこかに固まっていないか（3つに分けて、平均からのずれを数える）
-  const newGames=rounds.slice(fixed.length).flatMap(rd=>rd.games);
+  const newGames=rounds.slice(nf).flatMap(rd=>rd.games).filter(g=>!g._fx);
   const spOf=g=>{ const ls=g.teams.flat().map(p=>p.level); return Math.max(...ls)-Math.min(...ls); };
   let lump=0;
   if(newGames.length>=6){
@@ -464,11 +475,17 @@ function tally(rounds,pairs){
 }
 function generate(){
   const pairs=todayPairs();
-  // 終わったラウンドと、試合が始まっているラウンドは組み直さずに残す
-  let keepSt=0; const st=S.day?.started||0;
+  // 終わったラウンドと、もう始まった試合は組み直さずに残す（ユーザーの指定）。
+  // 途中まで始まったラウンドは、始まった試合だけ残して、そのラウンドの残りのコートから組み直す（partial）
+  let keepSt=0, partRaw=null; const st=S.day?.started||0;
   if(st) (S.day.rounds||[]).forEach((rd,ri)=>{ if(rd.games.some(g=>g.no<=st)) keepSt=ri+1; });
-  const keep=Math.max(S.day&&S.day.done>0 ? S.day.done : 0, keepSt);
-  if(!keep){
+  const done=S.day&&S.day.done>0 ? S.day.done : 0;
+  if(keepSt>done){
+    const rd=S.day.rounds[keepSt-1];
+    if(rd.games.some(g=>g.no>st)){ partRaw={rest:[],games:rd.games.filter(g=>g.no<=st)}; keepSt--; }
+  }
+  const keep=Math.max(done, keepSt);
+  if(!keep && !partRaw){
     S.day={date:TODAY,rounds:[],done:0,nums:null,off:{},joined:{},present:[]};
     // まだどのラウンドも終わっていなくても、到着待ちから来た人は遅刻者として扱う（全員が1回入るまで待つ）
     if(S.arrivedDate===TODAY) (S.arrived||[]).filter(id=>here().includes(id)).forEach(id=>{S.day.off[id]=0; S.day.joined[id]=0;});
@@ -476,7 +493,7 @@ function generate(){
   else {
     // 前回から増えた人（遅刻・戻ってきた人）は、その時点のみんなの平均試合数から数え始める
     const dy=S.day, pres=new Set(dy.present);
-    const fixedRaw=dy.rounds.slice(0,keep), real={};
+    const fixedRaw=dy.rounds.slice(0,keep).concat(partRaw?[partRaw]:[]), real={};
     fixedRaw.forEach(rd=>rd.games.forEach(g=>g.teams.flat().forEach(id=>real[id]=(real[id]||0)+1)));
     const base=here().filter(id=>pres.has(id));
     const avg=base.length? base.reduce((s,id)=>s+(real[id]||0)+(dy.off[id]||0),0)/base.length : 0;
@@ -486,13 +503,15 @@ function generate(){
   }
   const P=players();
   const fixed=keep ? hydrate(S.day.rounds.slice(0,keep),P) : [];
+  if(partRaw){ const pr=hydrate([partRaw],P)[0]; pr.partial=true; fixed.push(pr); }
   let rounds=fixed;
   if(P.length>=4){
     let best=null;
     for(let t=0;t<80;t++){const s=buildOnce(P,S.cfg,pairs,fixed,S.day.off); if(!best||s.score<best.score) best=s}
     rounds=best.rounds;
   }
-  S.day.rounds=dehydrate(rounds); S.day.present=here(); save();
+  S.day.rounds=dehydrate(rounds); S.day.present=here(); if(!whys.size) addWhy("自動で組み直し"); save();
+  needRegen=false;
   if(announce){ announce=false; setTimeout(()=>popup("組み合わせが設定されました。")); }
   schedule={...tally(rounds,pairs),rounds,P,pairs};
   stale=false;
@@ -525,6 +544,14 @@ function memberState(pub){
   return clean(pub) || {v:2,members:[],attend:[],ng:[],tp:[],cfg:{matches:30,courts:2,cross:0,pairGames:4},nextId:0,day:null};
 }
 let pushT=null, pushMsg="", pushBusy=false;
+/* 保存の理由（次の保存で記録に残す）。操作のたびに足し、何もないのに保存したら「自動」と記録する */
+const APP_V=11;
+const WHY={setLv:"部の変更",delMember:"メンバー削除",addMember:"メンバー追加",addNg:"NGペアの変更",delNg:"NGペアの変更",
+  addTp:"大会ペアの変更",delTp:"大会ペアの変更",clearTp:"大会ペアの変更",allOn:"参加者の変更",allOff:"参加者の変更",
+  regen:"組み直す",doneRound:"ラウンド終了",undoRound:"終了の取り消し",startGame:"開始",unstartGame:"開始の取り消し",
+  lateMark:"遅刻の連絡",lateIn:"到着",earlyOut:"早退",resetDay:"進行のリセット",toggleAttend:"参加者の変更",rename:"名前の変更"};
+const whys=new Set();
+const addWhy=w=>{ if(w) whys.add(w); };
 function pushTimerActive(){ return !!pushT || pushBusy; }
 function queuePush(){ clearTimeout(pushT); pushMsg="保存中…"; showStatus(); pushT=setTimeout(()=>{pushT=null;pushNow()},600); }
 /* 保存。手元の内容のもとになった版（cloud.baseAt）より新しい版がサーバーにあれば、上書きせずにそちらを読み込む。
@@ -537,6 +564,7 @@ async function pushNow(){
   try{
     pushMsg="保存中…"; showStatus();
     const at=Math.max(Date.now(),(cloud.baseAt||0)+1);
+    S.hist=[{by:cloud.email,why:[...whys].join("・")||"自動",at,v:APP_V},...(S.hist||[])].slice(0,20); whys.clear();
     const r=await window.cloudApi.push({json:JSON.stringify(S),at},{json:JSON.stringify(publicState()),at},cloud.baseAt||0);
     if(r?.conflict){ pushBusy=false; adoptPrivate(r.data,"ほかの管理者が先に変更していたため、その内容を表示しています。必要ならもう一度操作してください。"); return; }
     cloud.baseAt=at; pushMsg="";
@@ -834,6 +862,15 @@ function viewLate(P){
     ${done?`<div class="row"><button class="btn" data-act="resetDay">進行をリセット（最初から組み直す）</button></div>`:""}
     ${done&&done>=R?'<p class="note">全ラウンドが終わりました。</p>':""}`,"admin");
 }
+/* 保存の記録（管理者だけ）。だれが・いつ・何で保存したか。記録のない保存は古い版の端末から */
+function viewHist(){
+  const h=S.hist||[], last=h[0];
+  const row=e=>`<li><span class="no">${hhmm(e.at)}</span> ${esc(e.why)}　<span class="note">${esc(e.by)}${e.v&&e.v<APP_V?`（古い版 v${e.v}）`:""}</span></li>`;
+  const sub=last?`${hhmm(last.at)} ${esc(last.why)}（${esc((last.by||"").split("@")[0])}）`:"記録なし";
+  return det("hist","保存の記録",sub,`<p class="note">組み合わせなどを保存した人と、そのときの操作です（新しい順）。「自動」は操作なしの保存です。
+    記録が途中で消えていたら、古い版のアプリを開いたままの端末が保存した可能性があります。その端末はアプリを閉じて開き直してください。</p>
+    ${h.length?`<ul class="hist">${h.map(row).join("")}</ul>`:'<p class="note">まだ記録がありません。</p>'}`,"admin");
+}
 function viewMatches(){
   ensure();
   const P=schedule.P, cfg=S.cfg, done=S.day?.done||0;
@@ -843,9 +880,12 @@ function viewMatches(){
   // 管理者は、終わっていないラウンドの、まだ始まっていない試合と休みの人を入れ替えられる
   const canEdit=(ri,g)=>admin && ri>=done && (!g || g.no>started);
   const sel=dnd.sel;
+  // 「開始」を押せる試合：次の試合のラウンドと、その次のラウンドまで（2ラウンド以内、ユーザーの指定）
+  const nextR=schedule.rounds.findIndex(r=>r.games.some(g=>g.no===started+1));
+  const canStart=(ri,g)=>admin && g.no>started && ri>=done && nextR>=0 && ri<=nextR+1;
   const pl=(p,ri,g,slot)=>`<div class="p ${String(p.id)===focusId?"hl":""} ${canEdit(ri,g)?"drag":""} ${sel===`${ri}|${slot}`?"picked":""}" ${canEdit(ri,g)?`data-slot="${ri}|${slot}"`:""}><span class="no">${p.num}</span>${lvChip(p.level)}<span class="nm">${esc(p.name)}</span>${mkChip(p.mk)}</div>`;
   return `<section class="panel">
-  <div class="row"><h2 style="margin-right:auto">組み合わせ</h2><button class="btn primary admin" data-act="regen">${done?"残りを組み直す":"組み直す"}</button></div>
+  <div class="row"><h2 style="margin-right:auto">組み合わせ</h2>${needRegen?'<span class="tag warn admin">変更を反映するには→</span>':""}<button class="btn primary admin" data-act="regen">${done||started?"残りを組み直す":"組み直す"}</button></div>
   ${det("cfg","設定",`${cfg.matches}試合・${cfg.courts}面・交流戦 ${cfg.cross}回/人`,`<div class="cfg">
     <label for="cfgM">試合数<input type="number" id="cfgM" min="1" max="80" value="${cfg.matches}"></label>
     <label for="cfgC">コート数<input type="number" id="cfgC" min="1" max="8" value="${cfg.courts}"></label>
@@ -853,6 +893,7 @@ function viewMatches(){
   </div><p class="note">数字を変えたら「組み直す」を押してください。</p>`,"admin")}
   ${viewLate(P)}
   ${cloud.on&&cloud.admin?viewShare():""}
+  ${cloud.on&&cloud.admin?viewHist():""}
   ${cloud.on&&!cloud.admin&&S.day&&S.day.date!==TODAY?`<p class="note">${esc(S.day.date)} の組み合わせです。今日の分はまだ出ていません。</p>`:""}
   ${!schedule.rounds.length&&cloud.on&&!cloud.admin?`<p class="note">${cloud.ready?"まだ組み合わせが出ていません。管理者が作ると、ここに出ます。":"読み込み中…"}</p>`:
     P.length<4&&!schedule.rounds.length?'<p class="note">参加者が4人以上いると組み合わせを作れます。</p>':(shownPanes().some(p=>p.k==="summary")?"":statsStrip())+`
@@ -862,8 +903,10 @@ function viewMatches(){
   ${total?`<div class="progress">${started?`<span class="pill">第${started}試合まで開始</span>${started<total?`<span>次は第${started+1}試合</span>`:"<span>全試合が始まりました</span>"}`:"<span>まだ試合は始まっていません</span>"}</div>`:""}
   ${det("help","印の意味と使い方","タップして開く",`<div class="legend"><span class="it"><span class="tag pr">ペア練</span>大会ペアが味方で出る試合</span><span class="it"><span class="tag next">次</span>次にコートに入る試合</span></div>
     <div class="legend admin"><span class="it"><span class="tag">交流戦</span>1・2部と4・5部を混ぜた試合、または部の差が3以上の人（味方・相手とも）がいる試合</span></div>
-    <p class="note admin">試合がコートに入ったら、その試合の「開始」を押してください。グレーになり、メンバーの画面にも同じように出ます。</p>
-    <p class="note admin">組み合わせを手で直すときは、名前をつかんで（スマホは少し長押しして）入れ替えたい人の上に落とします。2人を続けてタップしても入れ替わります。同じラウンドの中で、まだ始まっていない試合と休みの人が対象です。</p>`)}
+    <p class="note admin">試合がコートに入ったら、その試合の「開始」を押してください。グレーになり、メンバーの画面にも同じように出ます。順番どおりでない試合が先に入ったときは、その試合の「先に開始」を押すと、次の番号の試合と入れ替えて開始にします（次のラウンドまで）。</p>
+    <p class="note admin">人を入れ替えるときは、名前をつかんで（スマホは少し長押しして）相手の名前の上に落とします。2人を続けてタップしても入れ替わります。別のラウンドの人とも入れ替えられます（2人とも、両方のラウンドで入れ替わるので、試合数は変わりません）。</p>
+    <p class="note admin">試合ごと入れ替えるときは、試合の見出し（「第◯試合」の行）をつかんで、別の試合の上に落とします。別のラウンドの試合と入れ替えて、同じラウンドに2回入る人が出たときは、空いた人と自動で入れ替えます。</p>
+    <p class="note admin">どれも、まだ始まっていない試合と休みの人が対象です。</p>`)}
   ${schedule.rounds.map((r,ri)=>`<div class="round ${ri<done?"done":""}">
     <div class="rhead"><span class="rn">第${ri+1}ラウンド</span>
       ${ri<done?'<span class="tag ok">終了</span>':""}
@@ -875,11 +918,12 @@ function viewMatches(){
       const has=focusId&&g.teams.flat().some(p=>String(p.id)===focusId);
       const sum=t=>t[0].level+t[1].level;
       const on=g.no<=started, next=ri>=done&&g.no===started+1;
-      return `<div class="match ${g.cross?"cross":""} ${on?"started":""} ${next?"next":""} ${focusId&&!has?"dim":""}">
+      const ge=canEdit(ri,g);
+      return `<div class="match ${g.cross?"cross":""} ${on?"started":""} ${next?"next":""} ${focusId&&!has?"dim":""} ${ge?"gdrag":""} ${sel===`G${ri}|${gi}`?"picked":""}" ${ge?`data-game="${ri}|${gi}"`:""}>
         <div class="mh"><span class="mno">第${g.no}試合</span><span>${courtName(g.court)}</span>${next?'<span class="tag next">次</span>':""}
         ${g.bad.length?'<span class="tag bad admin">NG同席</span>':""}${g.cross?'<span class="tag admin">交流戦</span>':""}${g.pm.length?`<span class="tag pr">ペア練 ${g.pm.map(mkChip).join("")}</span>`:""}
         ${on&&!admin?'<span class="tag">開始済み</span>':""}
-        ${admin&&g.no===started+1?`<button class="btn go admin" data-act="startGame" data-no="${g.no}">開始</button>`:""}
+        ${canStart(ri,g)?(g.no===started+1?`<button class="btn go admin" data-act="startGame" data-no="${g.no}">開始</button>`:`<button class="btn early admin" data-act="startGame" data-no="${g.no}" title="この試合を次の番号にして開始にします">先に開始</button>`):""}
         ${admin&&g.no===started?`<button class="btn undo admin" data-act="unstartGame" data-no="${g.no}">開始を取り消す</button>`:""}</div>
         <div class="teams">
           <div class="team">${g.teams[0].map((p,k)=>pl(p,ri,g,`g|${gi}|0|${k}`)).join("")}<span class="tsum">部の合計 ${sum(g.teams[0])}</span></div>
@@ -928,27 +972,138 @@ function viewSummary(){
 
 /* ---------- 操作 ---------- */
 /* ---------- 手で入れ替える（ドラッグ＆ドロップ、またはタップ2回） ----------
-   slot は "ラウンド|g|試合|チーム|位置" か "ラウンド|r|休みの何番目"。同じラウンドの中でだけ入れ替える */
+   slot は "ラウンド|g|試合|チーム|位置" か "ラウンド|r|休みの何番目"。試合ごとのときは "G" + "ラウンド|試合"。
+   対象は、終わっていないラウンドの、まだ始まっていない試合と休みの人 */
 const dnd={sel:null, drag:null};
+const lvOf=id=>byId(id)?.level||3, nameOf=id=>byId(id)?.name||"（削除済み）";
+const gIds=rd=>rd.games.flatMap(g=>g.teams.flat());
+const allIds=rd=>new Set([...rd.rest,...gIds(rd)]);
 function slotRef(rd, parts){ return parts[0]==="r" ? {arr:rd.rest, i:+parts[1]} : {arr:rd.games[+parts[1]].teams[+parts[2]], i:+parts[3]}; }
+/* その人がそのラウンドのどこにいるか（試合 g・チーム t・位置 k、または休み r） */
+function findIn(rd,id){
+  for(let g=0;g<rd.games.length;g++) for(let t=0;t<2;t++){ const k=rd.games[g].teams[t].indexOf(id); if(k>=0) return {g,t,k}; }
+  const r=rd.rest.indexOf(id); return r>=0?{r}:null;
+}
+/* そのラウンドの中で x と y の位置を入れ替える */
+function swapIn(rd,x,y){
+  rd.games.forEach(g=>g.teams.forEach(t=>t.forEach((id,k)=>{ if(id===x) t[k]=y; else if(id===y) t[k]=x; })));
+  rd.rest=rd.rest.map(id=>id===x?y:id===y?x:id);
+}
+/* 試合ごとのペア練と交流戦の印を付け直し、休みの人を番号順にする */
+function fixRound(rd){
+  const pairs=todayPairs();
+  rd.games.forEach(g=>{
+    g.pm=pairs.filter(pr=>g.teams.some(tm=>tm.includes(pr.a)&&tm.includes(pr.b))).map(pr=>pr.k);
+    const ls=g.teams.flat().map(lvOf); g.cross=(Math.min(...ls)<=2&&Math.max(...ls)>=4)||Math.max(...ls)-Math.min(...ls)>=3;
+  });
+  rd.rest.sort((x,y)=>(S.day.nums?.[x]??0)-(S.day.nums?.[y]??0));
+}
+const playCounts=()=>{ const c={}; (S.day?.rounds||[]).forEach(rd=>gIds(rd).forEach(id=>c[id]=(c[id]||0)+1)); return c; };
+/* 試合ごと入れ替えたあとで試合数が増えた人と減った人がいれば、まだ始まっていないラウンドで
+   「増えた人が出ていて、減った人が休み」の所を探して入れ替え、元の試合数に戻す。直したラウンドの番号を返す */
+function rebalance(before){
+  const dy=S.day, st=dy.started||0, touched=new Set();
+  for(let it=0;it<20;it++){
+    const now=playCounts(), ids=[...new Set([...Object.keys(before),...Object.keys(now)])].map(Number);
+    const up=ids.filter(id=>(now[id]||0)>(before[id]||0)), down=ids.filter(id=>(now[id]||0)<(before[id]||0));
+    if(!up.length||!down.length) break;
+    let best=null, bv=Infinity;
+    dy.rounds.forEach((rd,ri)=>{ if(ri<(dy.done||0)) return;
+      rd.games.forEach(g=>{ if(g.no<=st) return;
+        const ps=g.teams.flat();
+        for(const a of up) if(ps.includes(a)) for(const b of down) if(rd.rest.includes(b)){
+          const others=ps.filter(id=>id!==a);
+          const v=Math.abs(lvOf(a)-lvOf(b))*3+others.filter(o=>isNg(o,b)).length*1000+ri*0.01;
+          if(v<bv){ bv=v; best={ri,a,b}; }
+        }
+      });
+    });
+    if(!best||bv>=1000) break;
+    swapIn(dy.rounds[best.ri],best.a,best.b); touched.add(best.ri);
+  }
+  return [...touched];
+}
+/* 手で直したあと：印を付け直し、番号を固定して保存。試合数が変わった人がいれば知らせる */
+function afterEdit(ris,msg,before){
+  if(before) ris=[...new Set([...ris,...rebalance(before)])];
+  ris.forEach(ri=>fixRound(S.day.rounds[ri]));
+  if(!S.day.nums){ S.day.nums={}; schedule.P.forEach(p=>S.day.nums[p.id]=p.num); } // 手で直したら番号も固定する
+  let note="";
+  if(before){ const now=playCounts(), ch=[...new Set([...Object.keys(before),...Object.keys(now)])]
+      .map(Number).filter(id=>(now[id]||0)!==(before[id]||0));
+    if(ch.length) note="（試合数が変わった人："+ch.map(id=>`${nameOf(id)} ${(now[id]||0)>(before[id]||0)?"+":"−"}${Math.abs((now[id]||0)-(before[id]||0))}`).join("、")+"）"; }
+  schedule=null; stale=false; save(); render();
+  const ng=ris.some(ri=>schedule?.rounds?.[ri]?.games.some(g=>g.bad.length));
+  popup(msg+(ng?"（NGペアが同じ試合にいます）":"")+note);
+}
 function swapSlots(a,b){
   const [ra,...pa]=a.split("|"), [rb,...pb]=b.split("|");
   if(a===b) return;
-  if(ra!==rb){ popup("入れ替えられるのは、同じラウンドの中だけです。"); return; }
-  const ri=+ra, rd=S.day?.rounds?.[ri]; if(!rd) return;
-  const A=slotRef(rd,pa), B=slotRef(rd,pb);
-  const t=A.arr[A.i]; A.arr[A.i]=B.arr[B.i]; B.arr[B.i]=t;
-  // 入れ替えた試合のペア練と交流戦の印を付け直す
-  const pairs=todayPairs(), lv=id=>byId(id)?.level||3;
-  rd.games.forEach(g=>{
-    g.pm=pairs.filter(pr=>g.teams.some(tm=>tm.includes(pr.a)&&tm.includes(pr.b))).map(pr=>pr.k);
-    const ls=g.teams.flat().map(lv); g.cross=(Math.min(...ls)<=2&&Math.max(...ls)>=4)||Math.max(...ls)-Math.min(...ls)>=3;
-  });
-  rd.rest.sort((x,y)=>(S.day.nums?.[x]??0)-(S.day.nums?.[y]??0));
-  if(!S.day.nums){ S.day.nums={}; schedule.P.forEach(p=>S.day.nums[p.id]=p.num); } // 手で直したら番号も固定する
-  schedule=null; stale=false; save(); render();
-  const ng=schedule?.rounds?.[ri]?.games.some(g=>g.bad.length);
-  popup(ng?"入れ替えました（NGペアが同じ試合にいます）":"入れ替えました。");
+  const dy=S.day, st=dy?.started||0;
+  const r1=dy?.rounds?.[+ra], r2=dy?.rounds?.[+rb]; if(!r1||!r2) return;
+  if(ra===rb){
+    const A=slotRef(r1,pa), B=slotRef(r1,pb);
+    const t=A.arr[A.i]; A.arr[A.i]=B.arr[B.i]; B.arr[B.i]=t;
+    afterEdit([+ra],"入れ替えました。");
+    return;
+  }
+  // 別のラウンドどうし：2人を、両方のラウンドで入れ替える（どちらのラウンドにも1回ずつなので、試合数は変わらない）
+  const x=slotRef(r1,pa), y=slotRef(r2,pb), X=x.arr[x.i], Y=y.arr[y.i];
+  if(X===Y){ popup("同じ人です。"); return; }
+  const py=findIn(r1,Y), px=findIn(r2,X);
+  if(!py){ popup(`${nameOf(Y)}さんは第${+ra+1}ラウンドにいないため、入れ替えられません。`); return; }
+  if(!px){ popup(`${nameOf(X)}さんは第${+rb+1}ラウンドにいないため、入れ替えられません。`); return; }
+  if((py.g!=null&&r1.games[py.g].no<=st)||(px.g!=null&&r2.games[px.g].no<=st)){ popup("相手のラウンドで、もう始まっている試合に入っているため、入れ替えられません。"); return; }
+  swapIn(r1,X,Y); swapIn(r2,X,Y);
+  afterEdit([+ra,+rb],`第${+ra+1}・第${+rb+1}ラウンドで、${nameOf(X)}さんと${nameOf(Y)}さんを入れ替えました。`);
+}
+/* 試合ごと入れ替える（中身だけ。試合の番号とコートはそのまま）。
+   別のラウンドどうしでは、同じラウンドで2試合に入ることになった人を、そのラウンドで空いた人と入れ替える。
+   空いた人は、もう一方のラウンドで抜ける人を先に選び、試合数ができるだけ変わらないようにする。
+   できないときは理由の文を返す */
+function moveGame(ra,ga,rb,gb){
+  const dy=S.day, st=dy.started||0, r1=dy.rounds[ra], r2=dy.rounds[rb], G1=r1.games[ga], G2=r2.games[gb];
+  const body=g=>({teams:g.teams.map(t=>t.slice()),pm:g.pm.slice(),cross:g.cross});
+  const swap=()=>{ const b1=body(G1), b2=body(G2); Object.assign(G1,b2); Object.assign(G2,b1); };
+  if(ra===rb){ swap(); return null; }
+  const all1=allIds(r1), all2=allIds(r2), p1=G1.teams.flat(), p2=G2.teams.flat();
+  const m1=p2.filter(id=>!all1.has(id)), m2=p1.filter(id=>!all2.has(id));
+  if(m1.length) return `${m1.map(nameOf).join("・")}さんは第${ra+1}ラウンドにいないため、移せません。`;
+  if(m2.length) return `${m2.map(nameOf).join("・")}さんは第${rb+1}ラウンドにいないため、移せません。`;
+  const busy=(rd,gi,ps)=>{ for(const [k,g] of rd.games.entries()){ if(k===gi||g.no>st) continue;
+      const x=g.teams.flat().filter(id=>ps.includes(id)); if(x.length) return `${x.map(nameOf).join("・")}さんが、もう始まっている第${g.no}試合に出ているため、移せません。`; } return ""; };
+  const bz=busy(r1,ga,p2)||busy(r2,gb,p1); if(bz) return bz;
+  swap();
+  const dupOf=(rd,keep,ps)=>ps.filter(id=>rd.games.some((g,k)=>k!==keep&&g.teams.flat().includes(id)));
+  const d1=dupOf(r1,ga,p2), d2=dupOf(r2,gb,p1);
+  const fix=(rd,keep,dups,all,prefer)=>{
+    for(const x of dups){
+      const g=rd.games.find((g,k)=>k!==keep&&g.teams.flat().includes(x)); if(!g) continue;
+      const inG=new Set(gIds(rd)), others=g.teams.flat().filter(id=>id!==x);
+      const cost=id=>(prefer.includes(id)?0:50)+Math.abs(lvOf(id)-lvOf(x))*3+others.filter(o=>isNg(o,id)).length*1000+Math.random();
+      const free=[...all].filter(id=>!inG.has(id)).sort((a,b)=>cost(a)-cost(b));
+      if(!free.length) continue;
+      g.teams.forEach(t=>{ const k=t.indexOf(x); if(k>=0) t[k]=free[0]; });
+    }
+    const inG=new Set(gIds(rd)); rd.rest=[...all].filter(id=>!inG.has(id));
+  };
+  fix(r1,ga,d1,all1,d2); fix(r2,gb,d2,all2,d1);
+  return null;
+}
+function swapGames(a,b){
+  const [ra,ga]=a.slice(1).split("|").map(Number), [rb,gb]=b.slice(1).split("|").map(Number);
+  if(!S.day?.rounds?.[ra]?.games[ga]||!S.day.rounds[rb]?.games[gb]) return;
+  const before=playCounts(), err=moveGame(ra,ga,rb,gb);
+  if(err){ popup(err); render(); return; }
+  const n1=S.day.rounds[ra].games[ga].no, n2=S.day.rounds[rb].games[gb].no;
+  afterEdit(ra===rb?[ra]:[ra,rb],`第${n1}試合と第${n2}試合を入れ替えました。`,before);
+}
+/* 入れ替えの振り分け（人どうし・試合どうし） */
+function swapAny(a,b){
+  addWhy("手で入れ替え");
+  if(a[0]==="G"&&b[0]==="G") return swapGames(a,b);
+  if(a[0]!=="G"&&b[0]!=="G") return swapSlots(a,b);
+  popup("人は人の上に、試合は試合の上に落としてください。"); render();
 }
 function dndCleanup(){
   const d=dnd.drag; if(!d) return;
@@ -960,12 +1115,15 @@ function dndBegin(){
   const d=dnd.drag; if(!d) return;
   d.active=true; d.el.classList.add("dragging"); document.body.classList.add("nosel"); getSelection?.().removeAllRanges();
   const r=d.el.getBoundingClientRect(), g=d.el.cloneNode(true);
-  g.className="ghost"; g.style.width=r.width+"px"; g.style.left=(d.x-r.width/2)+"px"; g.style.top=(d.y-r.height/2)+"px";
+  g.className="ghost"+(d.el.dataset.game!=null?" match":""); g.style.width=r.width+"px"; g.style.left=(d.x-r.width/2)+"px"; g.style.top=(d.y-r.height/2)+"px";
   document.body.appendChild(g); d.ghost=g; d.w=r.width; d.h=r.height;
   navigator.vibrate?.(10);
 }
+const dkey=el=>el.dataset.slot ?? ("G"+el.dataset.game);
 document.addEventListener("pointerdown",e=>{
-  const el=e.target.closest("[data-slot]"); if(!el||e.button>0) return;
+  let el=e.target.closest("[data-slot]");
+  if(!el && !e.target.closest("button")) el=e.target.closest(".mh")?.closest("[data-game]"); // 試合ごと：見出しをつかむ
+  if(!el||e.button>0) return;
   if(e.pointerType==="mouse") e.preventDefault(); // マウスで文字が選択されないように
   dndCleanup();
   dnd.drag={el,x:e.clientX,y:e.clientY,sx:e.clientX,sy:e.clientY,type:e.pointerType,active:false,timer:null};
@@ -982,44 +1140,57 @@ document.addEventListener("pointermove",e=>{
   }
   d.ghost.style.left=(d.x-d.w/2)+"px"; d.ghost.style.top=(d.y-d.h/2)+"px";
   document.querySelectorAll(".drop").forEach(x=>x.classList.remove("drop"));
-  const t=document.elementFromPoint(d.x,d.y)?.closest("[data-slot]");
+  const t=document.elementFromPoint(d.x,d.y)?.closest(d.el.dataset.game!=null?"[data-game]":"[data-slot]");
   if(t&&t!==d.el) t.classList.add("drop");
 });
 document.addEventListener("touchmove",e=>{ if(dnd.drag?.active) e.preventDefault(); },{passive:false});
 document.addEventListener("pointerup",e=>{
   const d=dnd.drag; if(!d) return;
   if(d.active){
-    const t=document.elementFromPoint(e.clientX,e.clientY)?.closest("[data-slot]");
-    const a=d.el.dataset.slot, b=t?.dataset.slot;
+    const t=document.elementFromPoint(e.clientX,e.clientY)?.closest(d.el.dataset.game!=null?"[data-game]":"[data-slot]");
+    const a=dkey(d.el), b=t?dkey(t):null;
     dndCleanup(); dnd.sel=null;
-    if(b&&b!==a) swapSlots(a,b); else render();
+    if(b&&b!==a) swapAny(a,b); else render();
     return;
   }
   // タップ：1人目を選び、2人目をタップすると入れ替える
   dndCleanup();
-  const a=d.el.dataset.slot;
-  if(!dnd.sel){ dnd.sel=a; render(); }
+  const a=dkey(d.el);
+  if(!dnd.sel || (dnd.sel[0]==="G")!==(a[0]==="G")){ dnd.sel=a; render(); } // 人と試合を混ぜたら選び直し
   else if(dnd.sel===a){ dnd.sel=null; render(); }
-  else { const s0=dnd.sel; dnd.sel=null; swapSlots(s0,a); }
+  else { const s0=dnd.sel; dnd.sel=null; swapAny(s0,a); }
 });
 document.addEventListener("pointercancel",dndCleanup);
-document.addEventListener("contextmenu",e=>{ if(e.target.closest("[data-slot]")) e.preventDefault(); });
+document.addEventListener("contextmenu",e=>{ if(e.target.closest("[data-slot],[data-game] .mh")) e.preventDefault(); });
 
 function changed(regen){ if(regen) stale=true; save(); render(); }
+/* 今日の組み合わせに関係する人か（参加者か、今日の組み合わせに入っている人） */
+const inDay=id=>here().includes(id)||(S.day?.rounds||[]).some(rd=>gIds(rd).includes(id)||rd.rest.includes(id));
+/* 部・NGペア・大会ペア・メンバーの変更。試合が始まる前なら組み直す。始まったあとは自動では組み直さず、
+   「組み直す」を押したときに反映する（タブレットで指が触れただけで組み合わせが変わらないように） */
+let needRegen=false;
+function soft(affects){
+  const busy=(S.day?.started||0)>0||(S.day?.done||0)>0;
+  if(!affects){ save(); render(); return; }
+  if(!busy){ changed(true); return; }
+  needRegen=true; save(); render();
+  popup("保存しました。組み合わせに反映するには「残りを組み直す」を押してください。");
+}
 document.addEventListener("click",e=>{
   const t=e.target.closest("[data-tab]");
   if(t){tab=t.dataset.tab;try{localStorage.setItem("shuttle-tab",tab)}catch(_){}render();return}
   const a=e.target.closest("[data-act]"); if(!a) return;
   const id=+a.dataset.id, act=a.dataset.act;
-  if(act==="setLv"){byId(id).level=+a.dataset.lv;changed(true)}
-  if(act==="delMember"){S.members=S.members.filter(m=>m.id!==id);S.attend=S.attend.filter(x=>x!==id);S.ng=S.ng.filter(p=>!p.includes(id));S.tp=S.tp.filter(p=>p.a!==id&&p.b!==id);S.wait=(S.wait||[]).filter(x=>x!==id);changed(true)}
-  if(act==="addMember"){if(S.members.length>=MAX_MEMBERS){popup(`登録できるのは${MAX_MEMBERS}人までです。`);return}const n=$("#newName")?.value.trim();if(!n)return;const nid=S.nextId++;S.members.push({id:nid,name:n,level:+$("#newLv").value});S.attend.push(nid);changed(true)}
-  if(act==="addNg"){const x=+$("#ngA").value,y=+$("#ngB").value;if(x===y||isNg(x,y))return;S.ng.push([x,y]);changed(true)}
-  if(act==="delNg"){S.ng.splice(+a.dataset.i,1);changed(true)}
+  addWhy(WHY[act]);
+  if(act==="setLv"){const m=byId(id), lv=+a.dataset.lv; if(!m||m.level===lv) return; m.level=lv; soft(here().includes(id))}
+  if(act==="delMember"){S.members=S.members.filter(m=>m.id!==id);S.attend=S.attend.filter(x=>x!==id);S.ng=S.ng.filter(p=>!p.includes(id));S.tp=S.tp.filter(p=>p.a!==id&&p.b!==id);S.wait=(S.wait||[]).filter(x=>x!==id);soft(inDay(id))}
+  if(act==="addMember"){if(S.members.length>=MAX_MEMBERS){popup(`登録できるのは${MAX_MEMBERS}人までです。`);return}const n=$("#newName")?.value.trim();if(!n)return;const nid=S.nextId++;S.members.push({id:nid,name:n,level:+$("#newLv").value});S.attend.push(nid);soft(true)}
+  if(act==="addNg"){const x=+$("#ngA").value,y=+$("#ngB").value;if(x===y||isNg(x,y))return;S.ng.push([x,y]);soft(here().includes(x)&&here().includes(y))}
+  if(act==="delNg"){S.ng.splice(+a.dataset.i,1);soft(true)}
   if(act==="addTp"){const x=+$("#tpA").value,y=+$("#tpB").value;if(!x||!y||x===y)return;
-    const k=[0,1,2,3,4,5].find(k=>!S.tp.some(p=>p.k===k));if(k===undefined)return;S.tp.push({a:x,b:y,k});changed(true)}
-  if(act==="delTp"){S.tp.splice(+a.dataset.i,1);changed(true)}
-  if(act==="clearTp"){S.tp=[];changed(true)}
+    const k=[0,1,2,3,4,5].find(k=>!S.tp.some(p=>p.k===k));if(k===undefined)return;S.tp.push({a:x,b:y,k});soft(true)}
+  if(act==="delTp"){S.tp.splice(+a.dataset.i,1);soft(true)}
+  if(act==="clearTp"){S.tp=[];soft(true)}
   if(act==="allOn"){S.attend=S.members.map(m=>m.id);changed(true)}
   if(act==="allOff"){S.attend=[];changed(true)}
   if(act==="regen"){
@@ -1032,9 +1203,18 @@ document.addEventListener("click",e=>{
     if(!dy.nums){dy.nums={};schedule.P.forEach(p=>dy.nums[p.id]=p.num)} // 始まったら番号を固定
     dy.done=+a.dataset.i+1;changed(false)}
   if(act==="undoRound"){S.day.done=+a.dataset.i;changed(false)}
-  if(act==="startGame"){ensure();const dy=S.day;
+  if(act==="startGame"){ensure();const dy=S.day, st=dy.started||0, no=+a.dataset.no;
     if(!dy.nums){dy.nums={};schedule.P.forEach(p=>dy.nums[p.id]=p.num)} // 始まったら番号を固定
-    dy.started=+a.dataset.no;changed(false)}
+    if(no!==st+1){ // 先に開始：その試合を「次」の位置へ入れ替えてから開始にする
+      const pos=n=>{ for(let r=0;r<dy.rounds.length;r++){ const g=dy.rounds[r].games.findIndex(x=>x.no===n); if(g>=0) return [r,g]; } return null; };
+      const pN=pos(st+1), pG=pos(no); if(!pN||!pG) return;
+      if(!confirm(`第${no}試合を先に始めますか？\n第${st+1}試合と順番を入れ替えて、開始にします。`)) return;
+      const before=playCounts(), err=moveGame(pN[0],pN[1],pG[0],pG[1]);
+      if(err){ popup(err); return; }
+      dy.started=st+1;
+      afterEdit(pN[0]===pG[0]?[pN[0]]:[pN[0],pG[0]],`第${no}試合を第${st+1}試合にして、開始にしました。`,before);
+      return; }
+    dy.started=no;changed(false)}
   if(act==="unstartGame"){S.day.started=Math.max(0,+a.dataset.no-1);changed(false)}
   if(act==="lateMark"){const xs=mselValues("mLate");if(!xs.length)return;announce=true;waitSet();
     const nw=xs.filter(x=>!S.wait.includes(x)); logEv("wait",nw);
@@ -1069,6 +1249,7 @@ document.addEventListener("click",e=>{
     const hl=document.querySelector(".pane-matches .p.hl"); if(hl) hl.scrollIntoView({block:"center",behavior:"smooth"}); else window.scrollTo(0,0); }
 });
 document.addEventListener("change",e=>{
+  if(e.target.dataset.act) addWhy(WHY[e.target.dataset.act]);
   if(e.target.dataset.act==="toggleAttend"){const id=+e.target.dataset.id;
     S.attend=e.target.checked?[...S.attend,id]:S.attend.filter(x=>x!==id);
     if(!e.target.checked && waitSet().has(id)) logEv("absent",[id]);
@@ -1081,7 +1262,7 @@ document.addEventListener("change",e=>{
     if(!m) return; if(!n){e.target.value=m.name;return}
     // 名前だけなので組み合わせはそのまま。描き直すと次のボタン操作が消えるので、保存だけする
     m.name=n; schedule=null; save()}
-  if(e.target.id==="cfgP"){S.cfg.pairGames=+e.target.value;changed(true)}
+  if(e.target.id==="cfgP"){addWhy("ペア練の回数");S.cfg.pairGames=+e.target.value;soft(true)}
 });
 document.addEventListener("keydown",e=>{
   if(e.key==="Enter"&&e.target.id==="newName"){document.querySelector('[data-act="addMember"]').click()}

@@ -188,6 +188,17 @@ body.nosel{-webkit-user-select:none;user-select:none}
 .match.started.dim{opacity:.25}
 .mh .btn.go{margin-left:auto;padding:3px 12px;font-size:12px;background:var(--court);border-color:var(--court);color:var(--court-ink)}
 .mh .btn.undo{margin-left:auto;padding:3px 10px;font-size:12px}
+.mh .btn.early{margin-left:auto;padding:3px 10px;font-size:12px;border-color:var(--court);color:var(--court)}
+/* 試合ごと入れ替える：見出しをつかむ */
+.match.gdrag .mh{cursor:grab;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+.match.gdrag .mh:hover{background:var(--cork-soft)}
+.match.dragging{opacity:.35}
+.match.drop{outline:3px dashed var(--cork);outline-offset:2px}
+.match.picked{outline:3px solid var(--cork);outline-offset:2px}
+.hist{list-style:none;margin:0;padding:0;font-size:13px;display:grid;gap:4px}
+.hist .no{font-family:var(--f-mono)}
+.tag.warn{background:var(--warn-soft);color:var(--warn);border-color:transparent}
+.ghost.match{display:block;padding:0}
 .mh .tag+.btn{margin-left:6px}
 .progress{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:14px;font-weight:700}
 .progress .pill{background:var(--court);color:var(--court-ink);border-radius:999px;padding:2px 12px;font-size:13px}
@@ -337,7 +348,7 @@ tbody tr:nth-child(even) td{background:color-mix(in srgb,var(--bg) 55%,transpare
 <div class="wrap"><p class="mock" id="status">データはこの端末のブラウザにだけ保存されます。</p></div>
 
 <script src="qr.js?v=1"></script>
-<script src="app.js?v=9"></script>
+<script src="app.js?v=11"></script>
 <script type="module" src="cloud.js?v=2"></script>
 
 </body>
