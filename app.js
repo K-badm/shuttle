@@ -81,8 +81,13 @@ function save(){
   try{ localStorage.setItem("shuttle-v1", JSON.stringify(S)) }catch(e){}
   if(cloud.admin) queuePush();
 }
-const d=new Date();
-const TODAY=`${d.getFullYear()}.${String(d.getMonth()+1).padStart(2,"0")}.${String(d.getDate()).padStart(2,"0")}`;
+const dateStr=()=>{ const d=new Date(); return `${d.getFullYear()}.${String(d.getMonth()+1).padStart(2,"0")}.${String(d.getDate()).padStart(2,"0")}`; };
+const TODAY=dateStr();
+/* 日付が変わったら読み込み直す。前の日から開いたままの端末が、今日の組み合わせを「古い日の分」と思って
+   作り直し、ほかの人の画面まで変えてしまうのを防ぐ（2026-11-20 の不具合） */
+function checkDate(){ if(dateStr()!==TODAY){ location.reload(); return true; } return false; }
+document.addEventListener("visibilitychange",()=>{ if(document.visibilityState==="visible") checkDate(); });
+setInterval(checkDate,60000);
 /* 当日の進行。S.day = {date, rounds（IDで保存）, done（終わったラウンド数）, nums（固定した番号）,
    off（途中参加の人の試合数の下駄）, joined（途中参加したラウンド）, present（前回組んだときの参加者）} */
 if(S.day && S.day.date!==TODAY) S.day=null;
@@ -522,17 +527,37 @@ function memberState(pub){
 let pushT=null, pushMsg="", pushBusy=false;
 function pushTimerActive(){ return !!pushT || pushBusy; }
 function queuePush(){ clearTimeout(pushT); pushMsg="保存中…"; showStatus(); pushT=setTimeout(()=>{pushT=null;pushNow()},600); }
+/* 保存。手元の内容のもとになった版（cloud.baseAt）より新しい版がサーバーにあれば、上書きせずにそちらを読み込む。
+   電波の悪い端末の古い控えや、あとから届いた古い保存で、新しい組み合わせが勝手に変わるのを防ぐ */
 async function pushNow(){
   if(!cloud.admin || !window.cloudApi) return;
+  if(checkDate()) return;
   ensure();
-  pushBusy=true;
+  pushBusy=true; cloud.unsent=false;
   try{
-    pushMsg="保存中…（ネットにつながると送ります）"; showStatus();
-    await window.cloudApi.push({json:JSON.stringify(S),at:Date.now()},{json:JSON.stringify(publicState()),at:Date.now()});
-    pushMsg="";
-  }catch(e){ pushMsg=e.code==="permission-denied"?"保存できませんでした。管理者から外されている可能性があります。":"保存できませんでした（"+(e.code||e.message)+"）"; }
+    pushMsg="保存中…"; showStatus();
+    const at=Math.max(Date.now(),(cloud.baseAt||0)+1);
+    const r=await window.cloudApi.push({json:JSON.stringify(S),at},{json:JSON.stringify(publicState()),at},cloud.baseAt||0);
+    if(r?.conflict){ pushBusy=false; adoptPrivate(r.data,"ほかの管理者が先に変更していたため、その内容を表示しています。必要ならもう一度操作してください。"); return; }
+    cloud.baseAt=at; pushMsg="";
+  }catch(e){
+    if(e.code==="permission-denied") pushMsg="保存できませんでした。管理者から外されている可能性があります。";
+    else { cloud.unsent=true; pushMsg="ネットにつながらないため、まだ保存できていません。つながると送ります。"; }
+  }
   pushBusy=false;
   showStatus();
+}
+// つながったら・画面に戻ったら、送れていない分を送る（そのときも、もっと新しい版があれば上書きしない）
+window.addEventListener("online",()=>{ if(cloud.unsent) queuePush(); });
+document.addEventListener("visibilitychange",()=>{ if(document.visibilityState==="visible" && cloud.unsent) queuePush(); });
+/* サーバーの版をそのまま使う */
+function adoptPrivate(priv,msg){
+  let next; try{ next=clean(JSON.parse(priv.json)) }catch(e){ return }
+  if(!next) return;
+  cloud.baseAt=priv.at||0;
+  S=next; if(S.day && S.day.date!==TODAY) S.day=null;
+  try{ localStorage.setItem("shuttle-v1", JSON.stringify(S)) }catch(e){}
+  schedule=null; stale=false; render(); pushMsg=msg; showStatus();
 }
 function showStatus(){
   const el=$("#status"); if(!el) return;
@@ -558,8 +583,11 @@ function cloudAuth(isAdmin, priv, info){
   }
   cloud.admin=true; mode="admin"; tab="today";
   if(priv){ try{ S=clean(JSON.parse(priv.json))||LOCAL }catch(e){ S=LOCAL } } else S=LOCAL; // 初めてなら、この端末の分を送る
+  cloud.baseAt=priv?.at||0;
   if(S.day && S.day.date!==TODAY) S.day=null;
-  schedule=null; stale=false; render(); queuePush();
+  // 開いただけでは保存し直さない（古い控えで新しい組み合わせを上書きしないため）。初めてのときだけ送る。
+  // 日付が変わって今日の分を作ったときは、generate() の中で保存される
+  schedule=null; stale=false; render(); if(!priv) queuePush();
 }
 function cloudError(msg){ cloud.err=msg; showStatus(); }
 /* ほかの管理者が保存した内容を受け取る（自分の保存は除く） */
@@ -567,7 +595,8 @@ function cloudPrivate(priv){
   if(!cloud.admin || !priv || pushTimerActive()) return;
   let next; try{ next=clean(JSON.parse(priv.json)) }catch(e){ return }
   if(!next) return;
-  if(JSON.stringify(next)===JSON.stringify(S)) return;
+  if(JSON.stringify(next)===JSON.stringify(S)){ cloud.baseAt=Math.max(cloud.baseAt||0,priv.at||0); return; }
+  cloud.baseAt=priv.at||0;
   S=next; if(S.day && S.day.date!==TODAY) S.day=null;
   try{ localStorage.setItem("shuttle-v1", JSON.stringify(S)) }catch(e){}
   schedule=null; stale=false;

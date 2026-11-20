@@ -22,7 +22,15 @@ if (FB) {
         try { await F.terminate(db); await F.clearIndexedDbPersistence(db); } catch (e) {}
         location.reload();
       },
-      push: (priv, pub) => Promise.all([F.setDoc(privRef, priv), F.setDoc(pubRef, pub)]),
+      // サーバーの版が baseAt より新しければ書かずに、その版を返す（古い内容での上書きを防ぐ）。
+      // ネットにつながらないときは失敗する（端末に溜めて、あとで古い内容を送ってしまわないように）
+      push: (priv, pub, baseAt) => F.runTransaction(db, async tx => {
+        const cur = await tx.get(privRef);
+        const at = cur.exists() ? (cur.data().at || 0) : 0;
+        if (cur.exists() && at > baseAt) return { conflict: true, data: cur.data() };
+        tx.set(privRef, priv); tx.set(pubRef, pub);
+        return { conflict: false };
+      }),
       refreshPublic: watchPublic,
       addAdmin: email => F.setDoc(F.doc(db, "admins", email), { addedAt: Date.now() }),
       removeAdmin: email => F.deleteDoc(F.doc(db, "admins", email)),
@@ -42,7 +50,8 @@ if (FB) {
       }
       if (!role) { await A.signOut(auth); cloudAuth(false, null, { denied: email }); return; }
       let priv = null;
-      try { const s = await F.getDoc(privRef); priv = s.exists() ? s.data() : null; }
+      // まずサーバーから読む（端末の古い控えを最新と思わないように）。つながらないときだけ控えを使う
+      try { const s = await F.getDocFromServer(privRef).catch(() => F.getDoc(privRef)); priv = s.exists() ? s.data() : null; }
       catch (e) { cloudError(e.code || e.message); return; }
       cloudAuth(true, priv, { owner: role === "owner", email });
       // ほかの管理者の変更をすぐ反映する
