@@ -106,6 +106,10 @@ const lvChip = l => `<span class="lv lv${l}" title="${l}部">${l}部</span>`;
    5部は4部とも差があり、相手をするのは4部の人にも負担になるので、5部でない人の間でならす */
 const begGame = ps => ps.some(p=>p.level===5) && ps.some(p=>p.level!==5);
 const wideGame = ps => Math.max(...ps.map(p=>p.level)) - Math.min(...ps.map(p=>p.level)) >= 3;
+/* 同じ帯の試合：4人とも1・2部（上）か、4人とも4・5部（下）。3試合に1回はこうする（ユーザーの指定） */
+const bandOf = p => p.level<=2?"U":p.level>=4?"L":"";
+const bandGame = ps => { const b=bandOf(ps[0]); return !!b && ps.every(p=>bandOf(p)===b); };
+const BAND_EVERY = 3;
 const MARKS = ["A","B","C","D","E","F"];
 const MAX_MEMBERS = 30; // 登録できるメンバーの上限（ユーザーの指定）
 const mkChip = k => k==null ? "" : `<span class="mk mk${k%6}" title="大会ペア${MARKS[k%6]}">${MARKS[k%6]}</span>`;
@@ -172,6 +176,9 @@ function buildOnce(P, cfg, pairs, fixed=[], off={}){
   const pc=pairs.map(()=>0);
   const phase=pairs.map((_,j)=>(j+0.5)/pairs.length*0.9);
   const rounds=fixed.slice(); let ng=0, crossDone=0, gi=0;
+  // 同じ帯の試合：前の帯の試合から何試合あいたか（sinceBand）と、上・下それぞれの回数
+  let sinceBand=0; const bandDone={U:0,L:0};
+  const bandSize={U:P.filter(p=>bandOf(p)==="U").length, L:P.filter(p=>bandOf(p)==="L").length};
   // 終わったラウンドの出場・対戦・ペア練を数えておく
   fixed.forEach((rd,r)=>rd.games.forEach(g=>{
     const ps=g.teams.flat();
@@ -180,6 +187,7 @@ function buildOnce(P, cfg, pairs, fixed=[], off={}){
     for(const p of ps) if(cnt[p.id]!==undefined){cnt[p.id]++;real[p.id]++;last[p.id]=r;if(g.cross)xc[p.id]++;if(gb&&p.level!==5)bc[p.id]++}
     g.pm.forEach(k=>{const j=pairs.findIndex(pr=>pr.k===k); if(j>=0) pc[j]++});
     if(g.cross) crossDone++;
+    if(bandGame(ps)){ sinceBand=0; bandDone[bandOf(ps[0])]++; } else sinceBand++;
     gi++;
   }));
   for(let r=fixed.length; gi<M; r++){
@@ -212,18 +220,37 @@ function buildOnce(P, cfg, pairs, fixed=[], off={}){
       let cross=!forced.length && crossDone < Math.floor((i+1)*crossTotal/M+0.5);
       const aS=avail.filter(p=>p.level<=2&&ac(p.id)<=minC+(i%2)), aW=avail.filter(p=>p.level>=4&&ac(p.id)<=minC+(i%2));
       if(cross && (aS.length<2||aW.length<2)) cross=false;
+      // 同じ帯の枠：帯の試合のない試合が2つ続いたら、3つ目は1・2部同士か4・5部同士にする（交流戦の枠より先）
+      let band="";
+      if(sinceBand>=BAND_EVERY-1){
+        if(forced.length===1){ // ペア練の2人が同じ帯なら、残りの2人も同じ帯から選ぶ
+          const b=bandOf(forced[0][0]), fid=new Set(forced[0].map(p=>p.id));
+          if(b && bandOf(forced[0][1])===b && avail.filter(p=>!fid.has(p.id)&&bandOf(p)===b).length>=2) band=b;
+        } else if(!forced.length){
+          const ok4=b=>avail.filter(p=>bandOf(p)===b).length>=4;
+          const bs=["U","L"].filter(ok4).sort((x,y)=>(bandDone[x]+1)/bandSize[x]-(bandDone[y]+1)/bandSize[y]+(Math.random()-0.5)*0.05);
+          if(bs.length){ band=bs[0]; cross=false; }
+        }
+      }
       let cands;
       if(forced.length===2) cands=[[...forced[0],...forced[1]]];
       else if(forced.length===1){
         const fid=new Set(forced[0].map(p=>p.id));
-        const rest=avail.filter(p=>!fid.has(p.id)).sort((a,b)=>key(a)-key(b)).slice(0,10);
+        const rest=avail.filter(p=>!fid.has(p.id)&&(!band||bandOf(p)===band)).sort((a,b)=>key(a)-key(b)).slice(0,10);
         cands=combos(rest,2).map(o=>[...forced[0],...o]);
       } else if(cross){
         const ks=p=>key(p)+xc[p.id]*15;
         const ps=aS.sort((a,b)=>ks(a)-ks(b)).slice(0,6), pw=aW.sort((a,b)=>ks(a)-ks(b)).slice(0,6);
         cands=[]; for(const s of combos(ps,2)) for(const w of combos(pw,2)) cands.push([...s,...w]);
+      } else if(band){
+        cands=combos(avail.filter(p=>bandOf(p)===band).sort((a,b)=>key(a)-key(b)).slice(0,10),4);
       } else {
         cands=combos(avail.sort((a,b)=>key(a)-key(b)).slice(0,10),4);
+      }
+      // 帯の枠で、必ず出す人が入りきらないときは、ふつうの枠に戻す（試合数の均等が最優先）
+      const rcB=Math.min(C-c,M-gi), mrB=[...must].filter(id=>!used.has(id)).length, needB=Math.max(0,mrB-4*(rcB-1));
+      if(band && !forced.length && needB && !cands.some(g=>g.filter(p=>must.has(p.id)).length>=needB)){
+        band=""; cands=combos(avail.sort((a,b)=>key(a)-key(b)).slice(0,10),4);
       }
       // 必ず出す人のうち、残りのコートに入りきらない分は、この試合に入れる
       const rc=Math.min(C-c,M-gi), mr=[...must].filter(id=>!used.has(id)).length, need=Math.max(0,mr-4*(rc-1));
@@ -281,6 +308,7 @@ function buildOnce(P, cfg, pairs, fixed=[], off={}){
       const isX = cross || wideGame(best); // 交流戦の枠、または部の差が3以上の人がいる試合
       if(isX) crossDone++;
       const isB=begGame(best);
+      if(bandGame(best)){ sinceBand=0; bandDone[bandOf(best[0])]++; } else sinceBand++;
       for(const p of best){cnt[p.id]++;real[p.id]++;last[p.id]=r;used.add(p.id);if(isX)xc[p.id]++;if(isB&&p.level!==5)bc[p.id]++}
       games.push({no:i+1,court:c,cross:isX,teams:pair,bad,pm});
       gi++;
@@ -304,6 +332,7 @@ function buildOnce(P, cfg, pairs, fixed=[], off={}){
       for(const l of rd.rest){ if(!lows.includes(l.id) || ac(h.id)-ac(l.id)<=1) continue;
         if(late.has(l.id) && roundOpen[ri]===false) continue; // 全員が1回入る前のラウンドに遅刻者を入れない
         if(g.cross && cls(l)!==cls(h)) continue;
+        if(bandGame(g.teams.flat()) && bandOf(l)!==bandOf(h)) continue; // 同じ帯の試合は崩さない
         const others=g.teams.flat().filter(p=>p.id!==h.id);
         if(!g.cross && wideGame([...others,l])) continue; // 入れ替えで交流戦が増えないように
         if(others.some(o=>isNg(o.id,l.id))) continue;
@@ -396,8 +425,11 @@ function buildOnce(P, cfg, pairs, fixed=[], off={}){
     for(let k=0;k<3;k++){ const part=sps.slice(Math.floor(k*sps.length/3),Math.floor((k+1)*sps.length/3));
       const m=part.reduce((a,b)=>a+b,0)/part.length; lump+=(m-all)**2*part.length; }
   }
-  return {rounds,cnt,xc,bc,ng,crossTotal,pc,ppc,
-    score:ng*1000+varc*400+xdev*30+bdev*20+rep*2+pdev+lump*60};
+  // 同じ帯の試合のない試合が3つ以上続いた分（組めない顔ぶれの日は、どの案でも同じだけ増えるので比べるのに差し支えない）
+  let bgap=0, run=0;
+  rounds.forEach(rd=>rd.games.forEach(g=>{ if(bandGame(g.teams.flat())) run=0; else { run++; if(run>=BAND_EVERY) bgap++; } }));
+  return {rounds,cnt,xc,bc,ng,crossTotal,pc,ppc,bgap,
+    score:ng*1000+varc*400+xdev*30+bdev*20+rep*2+pdev+lump*60+bgap*40};
 }
 /* 保存用にIDだけにする／保存したものを選手の情報に戻す */
 function dehydrate(rounds){
@@ -593,6 +625,12 @@ function render(){
   mb.title=user?"タップで管理者画面に切り替え":"タップでメンバー画面に切り替え";
   if(cloud.on && !cloud.admin){ mb.textContent="管理者ログイン"; mb.title="管理者はここからログイン"; }
   mb.hidden = LOCKED;
+  // ログイン中の管理者を見出しに出す（管理者画面のときだけ）
+  const who=$("#who");
+  if(who){ const on=cloud.on && cloud.admin && !user; who.hidden=!on;
+    if(on){ const r=cloud.owner?"オーナー":"管理者";
+      who.innerHTML=`<span class="role">${r}</span><span class="em">${esc(cloud.email)}</span>`;
+      who.title=`${r}としてログイン中：${cloud.email}`; } }
   if(tab==="login" && (!cloud.on || cloud.admin)) tab="today";
   if(user&&tab==="members") tab="today";
   document.querySelectorAll("nav.tabs button").forEach(b=>b.setAttribute("aria-selected",b.dataset.tab===tab));

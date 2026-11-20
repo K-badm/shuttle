@@ -56,6 +56,12 @@ header.top .wrap{display:flex;align-items:center;gap:12px;padding-block:12px 0;f
 .brand{font-family:var(--f-display);font-weight:800;font-size:20px;letter-spacing:.02em;display:flex;align-items:center;gap:8px}
 .brand svg{flex:none}
 .date{font-family:var(--f-mono);font-size:12px;opacity:.85;margin-left:auto}
+/* ログイン中の管理者（管理者画面だけ） */
+.who{display:flex;align-items:center;gap:6px;min-width:0;max-width:min(46vw,360px);font-size:12px;background:rgba(0,0,0,.18);border-radius:999px;padding:3px 10px 3px 4px}
+.who[hidden]{display:none}
+.who .role{flex:none;background:var(--cork);color:#1b1206;font-weight:700;border-radius:999px;padding:1px 8px}
+.who .em{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--f-mono)}
+@media (max-width:520px){.who{order:1;max-width:100%;margin-top:2px} nav.tabs{order:2}}
 nav.tabs{display:flex;gap:2px;width:100%;overflow-x:auto;margin-top:6px}
 nav.tabs button{flex:1 0 auto;min-width:0;white-space:nowrap;background:none;border:0;color:var(--court-ink);opacity:.7;font:500 14px var(--f-body);padding:10px 10px;border-bottom:3px solid transparent;cursor:pointer}
 nav.tabs button[aria-selected="true"]{opacity:1;border-bottom-color:var(--cork);font-weight:700}
@@ -313,6 +319,7 @@ tbody tr:nth-child(even) td{background:color-mix(in srgb,var(--bg) 55%,transpare
       <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="18" r="4" fill="#c98b3c"/><path d="M8.5 16 5 3h14l-3.5 13z" fill="none" stroke="#fff" stroke-width="1.6" stroke-linejoin="round"/><path d="M9 3l1.5 12M15 3l-1.5 12M12 3v12" stroke="#fff" stroke-width="1.2"/></svg>
       組み合わせ
     </div>
+    <div class="who" id="who" hidden></div>
     <div class="date" id="today"></div>
     <button class="modebtn" id="modeBtn" data-act="mode" aria-pressed="false">管理者</button>
     <nav class="tabs" role="tablist">
@@ -330,7 +337,7 @@ tbody tr:nth-child(even) td{background:color-mix(in srgb,var(--bg) 55%,transpare
 <div class="wrap"><p class="mock" id="status">データはこの端末のブラウザにだけ保存されます。</p></div>
 
 <script src="qr.js?v=1"></script>
-<script src="app.js?v=7"></script>
+<script src="app.js?v=8"></script>
 <script type="module" src="cloud.js?v=1"></script>
 
 </body>
