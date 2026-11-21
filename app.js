@@ -30,7 +30,7 @@ function clean(raw){
   const seen=new Set(), members=[];
   for(const m of arr(raw.members,300)){
     const i=id(m?.id); if(i===null||seen.has(i)) continue; seen.add(i);
-    members.push({id:i, name:str(m.name,40)||"（名前なし）", level:int(m.level,1,5,3)});
+    members.push({id:i, name:str(m.name,40)||"（名前なし）", level:int(m.level,1,5,3), sex:m.sex==="f"?"f":"m"});
   }
   const c=raw.cfg||{};
   const out={v:2, members, attend:ids(raw.attend),
@@ -111,14 +111,18 @@ const lvChip = l => `<span class="lv lv${l}" title="${l}部">${l}部</span>`;
 /* 部の差が3以上の人（味方でも相手でも）が同じ試合にいれば、交流戦として数える（ユーザーの指定） */
 /* 5部（初心者）の相手：5部の人がいる試合に、5部でない人が入った回数を、交流戦とは別に数える（ユーザーの指定）。
    5部は4部とも差があり、相手をするのは4部の人にも負担になるので、5部でない人の間でならす */
-const begGame = ps => ps.some(p=>p.level===5) && ps.some(p=>p.level!==5);
-const wideGame = ps => Math.max(...ps.map(p=>p.level)) - Math.min(...ps.map(p=>p.level)) >= 3;
+/* 組み合わせに使う強さ。女性は男性より1部下（部の数字に1を足す）として数える（ユーザーの指定、2026-11-22）。
+   buildOnce の中の選手は、すでにこの値を level に入れた写し（lv0 に登録した部）なので、そのまま使う */
+const effLv = p => p.lv0!=null ? p.level : p.level+(p.sex==="f"?1:0);
+const lv0Of = p => p.lv0!=null ? p.lv0 : p.level; // 登録した部（表示と初心者の判定に使う）
+const begGame = ps => ps.some(p=>lv0Of(p)===5) && ps.some(p=>lv0Of(p)!==5);
+const wideGame = ps => Math.max(...ps.map(effLv)) - Math.min(...ps.map(effLv)) >= 3;
 /* 同じ帯の試合：4人とも1・2部（上）か、4人とも4・5部（下）。3試合に1回はこうする（ユーザーの指定） */
-const bandOf = p => p.level<=2?"U":p.level>=4?"L":"";
+const bandOf = p => effLv(p)<=2?"U":effLv(p)>=4?"L":"";
 const bandGame = ps => { const b=bandOf(ps[0]); return !!b && ps.every(p=>bandOf(p)===b); };
 const BAND_EVERY = 3;
 const MARKS = ["A","B","C","D","E","F"];
-const MAX_MEMBERS = 30; // 登録できるメンバーの上限（ユーザーの指定）
+const MAX_MEMBERS = 40; // 登録できるメンバーの上限（ユーザーの指定）
 const mkChip = k => k==null ? "" : `<span class="mk mk${k%6}" title="大会ペア${MARKS[k%6]}">${MARKS[k%6]}</span>`;
 
 /* 到着待ち（今日の参加者だが、遅刻でまだ来ていない人）。日付が変わったら空にする */
@@ -148,7 +152,7 @@ function players(){
     return here().map(byId).filter(Boolean).sort((a,b)=>fz[a.id]-fz[b.id]).map(p=>({...p,num:fz[p.id],mk:mk[p.id]}));
   }
   const ps = here().map(byId).filter(Boolean)
-    .sort((a,b)=> b.level-a.level || a.id-b.id);
+    .sort((a,b)=> effLv(b)-effLv(a) || a.id-b.id);
   return ps.map((p,i)=>({...p,num:i+1,mk:mk[p.id]}));
 }
 
@@ -160,6 +164,7 @@ function combos(arr,k){
 }
 /* fixed: 終わったラウンド（そのまま残す）。off: 途中参加の人の試合数の下駄 */
 function buildOnce(P, cfg, pairs, fixed=[], off={}){
+  P=P.map(p=>p.lv0!=null?p:{...p,level:effLv(p),lv0:p.level}); // 女性は1部下として数える
   const M=cfg.matches, C=Math.max(1,cfg.courts), T=cfg.pairGames;
   const byPid={}; P.forEach(p=>byPid[p.id]=p);
   const strong=P.filter(p=>p.level<=2), weak=P.filter(p=>p.level>=4);
@@ -191,7 +196,7 @@ function buildOnce(P, cfg, pairs, fixed=[], off={}){
     const ps=g.teams.flat();
     for(let a=0;a<4;a++)for(let b=a+1;b<4;b++) meet[mk(ps[a].id,ps[b].id)]=mt(ps[a].id,ps[b].id)+1;
     const gb=begGame(ps);
-    for(const p of ps) if(cnt[p.id]!==undefined){cnt[p.id]++;real[p.id]++;last[p.id]=r;if(g.cross)xc[p.id]++;if(gb&&p.level!==5)bc[p.id]++}
+    for(const p of ps) if(cnt[p.id]!==undefined){cnt[p.id]++;real[p.id]++;last[p.id]=r;if(g.cross)xc[p.id]++;if(gb&&lv0Of(p)!==5)bc[p.id]++}
     g.pm.forEach(k=>{const j=pairs.findIndex(pr=>pr.k===k); if(j>=0) pc[j]++});
     if(g.cross) crossDone++;
     if(bandGame(ps)){ sinceBand=0; bandDone[bandOf(ps[0])]++; } else sinceBand++;
@@ -288,14 +293,16 @@ function buildOnce(P, cfg, pairs, fixed=[], off={}){
         if(forced.length===1){
           const s1=g[0].level+g[1].level, s2=g[2].level+g[3].level;
           cost+=(s1-s2)**2*8 + Math.abs(g[2].level-g[3].level)*3;
+          const ls=g.map(p=>p.level), sp=Math.max(...ls)-Math.min(...ls); if(sp>=2) cost+=40*(sp-1);
         } else if(cross){ for(const p of g) cost+=xc[p.id]*xc[p.id]*25; }
         else if(!forced.length){
           const ls=g.map(p=>p.level), sp=Math.max(...ls)-Math.min(...ls);
           cost+=sp*sp*9;
+          if(sp>=2) cost+=150*(sp-1); // ふだんの試合は部の差1以内が基本（ユーザーの指定）
           if(Math.min(...ls)<=2 && Math.max(...ls)>=4) cost+=60;
         }
         // 5部の相手が同じ人に片寄らないように（もう相手をした回数が多い人ほど選びにくくする）
-        if(begGame(g)) for(const p of g) if(p.level!==5) cost+=bc[p.id]*bc[p.id]*10;
+        if(begGame(g)) for(const p of g) if(lv0Of(p)!==5) cost+=bc[p.id]*bc[p.id]*10;
         cost+=Math.random();
         if(cost<bcost){bcost=cost;best=g}
       }
@@ -323,7 +330,7 @@ function buildOnce(P, cfg, pairs, fixed=[], off={}){
       if(isX) crossDone++;
       const isB=begGame(best);
       if(bandGame(best)){ sinceBand=0; bandDone[bandOf(best[0])]++; } else sinceBand++;
-      for(const p of best){cnt[p.id]++;real[p.id]++;last[p.id]=r;used.add(p.id);if(isX)xc[p.id]++;if(isB&&p.level!==5)bc[p.id]++}
+      for(const p of best){cnt[p.id]++;real[p.id]++;last[p.id]=r;used.add(p.id);if(isX)xc[p.id]++;if(isB&&lv0Of(p)!==5)bc[p.id]++}
       games.push({no:i+1,court:c,cross:isX,teams:pair,bad,pm});
       gi++;
     }
@@ -352,7 +359,8 @@ function buildOnce(P, cfg, pairs, fixed=[], off={}){
         const others=g.teams.flat().filter(p=>p.id!==h.id);
         if(!g.cross && wideGame([...others,l])) continue; // 入れ替えで交流戦が増えないように
         if(others.some(o=>isNg(o.id,l.id))) continue;
-        const v=Math.abs(l.level-h.level)+Math.random()*0.1;
+        let v=Math.abs(l.level-h.level)+Math.random()*0.1;
+        if(!g.cross){ const ls=[...others,l].map(p=>p.level), sp=Math.max(...ls)-Math.min(...ls); if(sp>=2) v+=5*(sp-1); }
         if(v<bs){bs=v;bestSw={rd,g,t,s,h,l}}
       }
     }
@@ -422,12 +430,12 @@ function buildOnce(P, cfg, pairs, fixed=[], off={}){
   }
   const vals=P.map(p=>ac(p.id)), mean=vals.reduce((s,v)=>s+v,0)/vals.length;
   const varc=vals.reduce((s,v)=>s+(v-mean)**2,0);
-  const sw=P.filter(p=>p.level<=2||p.level>=4);
+  const sw=P.filter(p=>effLv(p)<=2||effLv(p)>=4);
   const xdev=sw.reduce((s,p)=>s+(xc[p.id]-cfg.cross)**2,0);
   // 5部の相手をした回数は、入れ替えのあとの組み合わせで数え直し、5部でない人の間のばらつきをスコアに足す
   P.forEach(p=>bc[p.id]=0);
-  rounds.forEach(rd=>rd.games.forEach(g=>{ const ps=g.teams.flat(); if(begGame(ps)) ps.forEach(p=>{ if(p.level!==5&&bc[p.id]!==undefined) bc[p.id]++ }); }));
-  const nb=P.filter(p=>p.level!==5), bm=nb.length?nb.reduce((s,p)=>s+bc[p.id],0)/nb.length:0;
+  rounds.forEach(rd=>rd.games.forEach(g=>{ const ps=g.teams.flat(); if(begGame(ps)) ps.forEach(p=>{ if(lv0Of(p)!==5&&bc[p.id]!==undefined) bc[p.id]++ }); }));
+  const nb=P.filter(p=>lv0Of(p)!==5), bm=nb.length?nb.reduce((s,p)=>s+bc[p.id],0)/nb.length:0;
   const bdev=nb.reduce((s,p)=>s+(bc[p.id]-bm)**2,0);
   const rep=Object.values(meet).reduce((s,v)=>s+(v>1?(v-1)**2:0),0);
   const pdev=pc.reduce((s,v)=>s+(v<3?(3-v)*2000:0)+(v>4?(v-4)*300:0)+(v-T)**2*80,0);
@@ -444,8 +452,10 @@ function buildOnce(P, cfg, pairs, fixed=[], off={}){
   // 同じ帯の試合のない試合が3つ以上続いた分（組めない顔ぶれの日は、どの案でも同じだけ増えるので比べるのに差し支えない）
   let bgap=0, run=0;
   rounds.forEach(rd=>rd.games.forEach(g=>{ if(bandGame(g.teams.flat())) run=0; else { run++; if(run>=BAND_EVERY) bgap++; } }));
-  return {rounds,cnt,xc,bc,ng,crossTotal,pc,ppc,bgap,
-    score:ng*1000+varc*400+xdev*30+bdev*20+rep*2+pdev+lump*60+bgap*40};
+  // ふだんの試合（交流戦・ペア練以外）で部の差が2以上の試合の数
+  const sp2=newGames.filter(g=>!g.cross&&!g.pm.length&&spOf(g)>=2).length;
+  return {rounds,cnt,xc,bc,ng,crossTotal,pc,ppc,bgap,sp2,
+    score:ng*1000+varc*400+xdev*30+bdev*20+rep*2+pdev+lump*60+bgap*40+sp2*30};
 }
 /* 保存用にIDだけにする／保存したものを選手の情報に戻す */
 function dehydrate(rounds){
@@ -466,7 +476,7 @@ function tally(rounds,pairs){
   const pc=pairs.map(pr=>0);
   for(const rd of rounds) for(const g of rd.games){
     const ps=g.teams.flat(), gb=begGame(ps);
-    for(const p of ps){cnt[p.id]=(cnt[p.id]||0)+1; if(g.cross) xc[p.id]=(xc[p.id]||0)+1; if(gb&&p.level!==5) bc[p.id]=(bc[p.id]||0)+1}
+    for(const p of ps){cnt[p.id]=(cnt[p.id]||0)+1; if(g.cross) xc[p.id]=(xc[p.id]||0)+1; if(gb&&lv0Of(p)!==5) bc[p.id]=(bc[p.id]||0)+1}
     ng+=g.bad.length;
     g.pm.forEach(k=>{const j=pairs.findIndex(pr=>pr.k===k); if(j>=0) pc[j]++});
   }
@@ -508,7 +518,7 @@ function generate(){
   if(P.length>=4){
     let best=null;
     for(let t=0;t<80;t++){const s=buildOnce(P,S.cfg,pairs,fixed,S.day.off); if(!best||s.score<best.score) best=s}
-    rounds=best.rounds;
+    rounds=hydrate(dehydrate(best.rounds),P); // buildOnce の中の強さ（女性は1部下）から、登録した部の表示に戻す
   }
   S.day.rounds=dehydrate(rounds); S.day.present=here(); if(!whys.size) addWhy("自動で組み直し"); save();
   needRegen=false;
@@ -545,7 +555,7 @@ function memberState(pub){
 }
 let pushT=null, pushMsg="", pushBusy=false;
 /* 保存の理由（次の保存で記録に残す）。操作のたびに足し、何もないのに保存したら「自動」と記録する */
-const APP_V=13;
+const APP_V=14;
 /* private/state の json は {fmt:2, s:S} の形で保存する（2026-11-22）。古い版のアプリはこの形を読めないので、
    こちらの保存に反応して組み直し・上書きすることがなくなる。読むときは、新しい形（fmt:2）だけを使う */
 const PRIV_FMT=2;
@@ -554,7 +564,7 @@ function readPriv(priv, allowOld){
   if(o && o.fmt===PRIV_FMT) return clean(o.s);
   return allowOld ? clean(o) : null; // 古い形（古い版のアプリが保存したもの）
 }
-const WHY={setLv:"部の変更",delMember:"メンバー削除",addMember:"メンバー追加",addNg:"NGペアの変更",delNg:"NGペアの変更",
+const WHY={setLv:"部の変更",setSex:"性別の変更",delMember:"メンバー削除",addMember:"メンバー追加",addNg:"NGペアの変更",delNg:"NGペアの変更",
   addTp:"大会ペアの変更",delTp:"大会ペアの変更",clearTp:"大会ペアの変更",allOn:"参加者の変更",allOff:"参加者の変更",
   regen:"組み直す",doneRound:"ラウンド終了",undoRound:"終了の取り消し",startGame:"開始",unstartGame:"開始の取り消し",
   lateMark:"遅刻の連絡",lateIn:"到着",earlyOut:"早退",resetDay:"進行のリセット",toggleAttend:"参加者の変更",rename:"名前の変更"};
@@ -746,11 +756,12 @@ function viewMembers(){
   const sorted=[...S.members].sort((a,b)=>a.level-b.level||a.id-b.id);
   const opts=sorted.map(m=>`<option value="${m.id}">${esc(m.name)}（${m.level}部）</option>`).join("");
   return `<section class="panel">
-  <div><h2>メンバーと部 <span class="no" style="font-size:15px">${S.members.length}/${MAX_MEMBERS}人</span></h2><p class="note">管理者だけが見る画面の想定です。1部が上級者、5部が初心者です。名前はタップすると直せます。</p></div>
+  <div><h2>メンバーと部 <span class="no" style="font-size:15px">${S.members.length}/${MAX_MEMBERS}人</span></h2><p class="note">管理者だけが見る画面の想定です。1部が上級者、5部が初心者です。女性は、組み合わせを作るときに男性より1部下（例：女性の3部＝男性の4部）として数えます。名前はタップすると直せます。</p></div>
   <div class="box">
     ${S.members.length>=MAX_MEMBERS?`<p class="note">登録できるのは${MAX_MEMBERS}人までです。追加するときは、先にほかの人を削除してください。</p>`:`<div class="row">
       <input type="text" id="newName" placeholder="名前を追加" style="flex:1;min-width:140px">
       <select id="newLv">${[1,2,3,4,5].map(l=>`<option value="${l}" ${l===3?"selected":""}>${l}部</option>`).join("")}</select>
+      <select id="newSex" aria-label="性別"><option value="m">男性</option><option value="f">女性</option></select>
       <button class="btn primary" data-act="addMember">追加</button>
     </div>`}
   </div>
@@ -760,6 +771,9 @@ function viewMembers(){
       ${ngIds.has(m.id)?'<span class="ngmark" title="NGペアあり">NG</span>':""}
       <div class="seg" role="group" aria-label="${esc(m.name)}の部">
         ${[1,2,3,4,5].map(l=>`<button class="${m.level===l?"on":""}" data-act="setLv" data-id="${m.id}" data-lv="${l}" aria-pressed="${m.level===l}">${l}部</button>`).join("")}
+      </div>
+      <div class="seg sx" role="group" aria-label="${esc(m.name)}の性別">
+        ${[["m","男"],["f","女"]].map(([k,t])=>`<button class="${(m.sex||"m")===k?"on":""}" data-act="setSex" data-id="${m.id}" data-sex="${k}" aria-pressed="${(m.sex||"m")===k}">${t}</button>`).join("")}
       </div>
       <button class="x" data-act="delMember" data-id="${m.id}" aria-label="${esc(m.name)}を削除">×</button>
     </div>`).join("")}
@@ -819,7 +833,7 @@ function statsStrip(){
   // 時間どおりに来た人どうしで比べる（遅刻者は −1 回まで少なくてよい）
   const onTime=P.filter(p=>joined[p.id]==null);
   const c=onTime.length?onTime.map(p=>schedule.cnt[p.id]||0):[0];
-  const sw=P.filter(p=>p.level<=2||p.level>=4);
+  const sw=P.filter(p=>effLv(p)<=2||effLv(p)>=4);
   const xa=sw.length? (sw.reduce((s,p)=>s+(schedule.xc[p.id]||0),0)/sw.length):0;
   const mn=Math.min(...c), mx=Math.max(...c);
   // 5部の相手（5部と、5部でない人の両方がいる日だけ出す）
@@ -893,7 +907,7 @@ function viewMatches(){
   // 「開始」を押せる試合：次の試合のラウンドと、その次のラウンドまで（2ラウンド以内、ユーザーの指定）
   const nextR=schedule.rounds.findIndex(r=>r.games.some(g=>g.no===started+1));
   const canStart=(ri,g)=>admin && g.no>started && ri>=done && nextR>=0 && ri<=nextR+1;
-  const pl=(p,ri,g,slot)=>`<div class="p ${String(p.id)===focusId?"hl":""} ${canEdit(ri,g)?"drag":""} ${sel===`${ri}|${slot}`?"picked":""}" ${canEdit(ri,g)?`data-slot="${ri}|${slot}"`:""}><span class="no">${p.num}</span>${lvChip(p.level)}<span class="nm">${esc(p.name)}</span>${mkChip(p.mk)}</div>`;
+  const pl=(p,ri,g,slot)=>`<div class="p ${String(p.id)===focusId?"hl":""} ${canEdit(ri,g)?"drag":""} ${sel===`${ri}|${slot}`?"picked":""}" ${canEdit(ri,g)?`data-slot="${ri}|${slot}"`:""}><span class="no">${p.num}</span>${lvChip(p.level)}${p.sex==="f"?'<span class="fem admin" title="女性（1部下として数える）">女</span>':""}<span class="nm">${esc(p.name)}</span>${mkChip(p.mk)}</div>`;
   return `<section class="panel">
   <div class="row"><h2 style="margin-right:auto">組み合わせ</h2>${needRegen?'<span class="tag warn admin">変更を反映するには→</span>':""}<button class="btn primary admin" data-act="regen">${done||started?"残りを組み直す":"組み直す"}</button></div>
   ${det("cfg","設定",`${cfg.matches}試合・${cfg.courts}面・交流戦 ${cfg.cross}回/人`,`<div class="cfg">
@@ -985,7 +999,7 @@ function viewSummary(){
    slot は "ラウンド|g|試合|チーム|位置" か "ラウンド|r|休みの何番目"。試合ごとのときは "G" + "ラウンド|試合"。
    対象は、終わっていないラウンドの、まだ始まっていない試合と休みの人 */
 const dnd={sel:null, drag:null};
-const lvOf=id=>byId(id)?.level||3, nameOf=id=>byId(id)?.name||"（削除済み）";
+const lvOf=id=>{ const m=byId(id); return m?effLv(m):3; }, nameOf=id=>byId(id)?.name||"（削除済み）";
 const gIds=rd=>rd.games.flatMap(g=>g.teams.flat());
 const allIds=rd=>new Set([...rd.rest,...gIds(rd)]);
 function slotRef(rd, parts){ return parts[0]==="r" ? {arr:rd.rest, i:+parts[1]} : {arr:rd.games[+parts[1]].teams[+parts[2]], i:+parts[3]}; }
@@ -1192,9 +1206,10 @@ document.addEventListener("click",e=>{
   const a=e.target.closest("[data-act]"); if(!a) return;
   const id=+a.dataset.id, act=a.dataset.act;
   addWhy(WHY[act]);
+  if(act==="setSex"){const m=byId(id), sx=a.dataset.sex==="f"?"f":"m"; if(!m||(m.sex||"m")===sx) return; m.sex=sx; soft(here().includes(id))}
   if(act==="setLv"){const m=byId(id), lv=+a.dataset.lv; if(!m||m.level===lv) return; m.level=lv; soft(here().includes(id))}
   if(act==="delMember"){S.members=S.members.filter(m=>m.id!==id);S.attend=S.attend.filter(x=>x!==id);S.ng=S.ng.filter(p=>!p.includes(id));S.tp=S.tp.filter(p=>p.a!==id&&p.b!==id);S.wait=(S.wait||[]).filter(x=>x!==id);soft(inDay(id))}
-  if(act==="addMember"){if(S.members.length>=MAX_MEMBERS){popup(`登録できるのは${MAX_MEMBERS}人までです。`);return}const n=$("#newName")?.value.trim();if(!n)return;const nid=S.nextId++;S.members.push({id:nid,name:n,level:+$("#newLv").value});S.attend.push(nid);soft(true)}
+  if(act==="addMember"){if(S.members.length>=MAX_MEMBERS){popup(`登録できるのは${MAX_MEMBERS}人までです。`);return}const n=$("#newName")?.value.trim();if(!n)return;const nid=S.nextId++;S.members.push({id:nid,name:n,level:+$("#newLv").value,sex:$("#newSex")?.value==="f"?"f":"m"});S.attend.push(nid);soft(true)}
   if(act==="addNg"){const x=+$("#ngA").value,y=+$("#ngB").value;if(x===y||isNg(x,y))return;S.ng.push([x,y]);soft(here().includes(x)&&here().includes(y))}
   if(act==="delNg"){S.ng.splice(+a.dataset.i,1);soft(true)}
   if(act==="addTp"){const x=+$("#tpA").value,y=+$("#tpB").value;if(!x||!y||x===y)return;
