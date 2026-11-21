@@ -545,7 +545,15 @@ function memberState(pub){
 }
 let pushT=null, pushMsg="", pushBusy=false;
 /* 保存の理由（次の保存で記録に残す）。操作のたびに足し、何もないのに保存したら「自動」と記録する */
-const APP_V=12;
+const APP_V=13;
+/* private/state の json は {fmt:2, s:S} の形で保存する（2026-11-22）。古い版のアプリはこの形を読めないので、
+   こちらの保存に反応して組み直し・上書きすることがなくなる。読むときは、新しい形（fmt:2）だけを使う */
+const PRIV_FMT=2;
+function readPriv(priv, allowOld){
+  let o; try{ o=JSON.parse(priv.json) }catch(e){ return null }
+  if(o && o.fmt===PRIV_FMT) return clean(o.s);
+  return allowOld ? clean(o) : null; // 古い形（古い版のアプリが保存したもの）
+}
 const WHY={setLv:"部の変更",delMember:"メンバー削除",addMember:"メンバー追加",addNg:"NGペアの変更",delNg:"NGペアの変更",
   addTp:"大会ペアの変更",delTp:"大会ペアの変更",clearTp:"大会ペアの変更",allOn:"参加者の変更",allOff:"参加者の変更",
   regen:"組み直す",doneRound:"ラウンド終了",undoRound:"終了の取り消し",startGame:"開始",unstartGame:"開始の取り消し",
@@ -567,7 +575,7 @@ async function pushNow(){
     S.hist=[{by:cloud.email,why:[...whys].join("・")||"自動",at,v:APP_V},...(S.hist||[])].slice(0,20); whys.clear();
     // v（アプリの版）と d（今日の日付 yyyymmdd）を付ける。Firestore のルールで、古い版や日付の違う端末からの保存を断る
     const v=APP_V, dd=+TODAY.replace(/\./g,"");
-    const r=await window.cloudApi.push({json:JSON.stringify(S),at,v,d:dd},{json:JSON.stringify(publicState()),at,v,d:dd},cloud.baseAt||0);
+    const r=await window.cloudApi.push({json:JSON.stringify({fmt:PRIV_FMT,s:S}),at,v,d:dd},{json:JSON.stringify(publicState()),at,v,d:dd},cloud.baseAt||0);
     if(r?.conflict){ pushBusy=false; adoptPrivate(r.data,"ほかの管理者が先に変更していたため、その内容を表示しています。必要ならもう一度操作してください。"); return; }
     cloud.baseAt=at; pushMsg="";
   }catch(e){
@@ -582,7 +590,7 @@ window.addEventListener("online",()=>{ if(cloud.unsent) queuePush(); });
 document.addEventListener("visibilitychange",()=>{ if(document.visibilityState==="visible" && cloud.unsent) queuePush(); });
 /* サーバーの版をそのまま使う */
 function adoptPrivate(priv,msg){
-  let next; try{ next=clean(JSON.parse(priv.json)) }catch(e){ return }
+  const next=readPriv(priv,false);
   if(!next) return;
   cloud.baseAt=priv.at||0;
   S=next; if(S.day && S.day.date!==TODAY) S.day=null;
@@ -612,7 +620,7 @@ function cloudAuth(isAdmin, priv, info){
     showStatus(); return;
   }
   cloud.admin=true; mode="admin"; tab="today";
-  if(priv){ try{ S=clean(JSON.parse(priv.json))||LOCAL }catch(e){ S=LOCAL } } else S=LOCAL; // 初めてなら、この端末の分を送る
+  if(priv){ S=readPriv(priv,true)||LOCAL; } else S=LOCAL; // 初めてなら、この端末の分を送る
   cloud.baseAt=priv?.at||0;
   if(S.day && S.day.date!==TODAY) S.day=null;
   // 開いただけでは保存し直さない（古い控えで新しい組み合わせを上書きしないため）。初めてのときだけ送る。
@@ -623,7 +631,7 @@ function cloudError(msg){ cloud.err=msg; showStatus(); }
 /* ほかの管理者が保存した内容を受け取る（自分の保存は除く） */
 function cloudPrivate(priv){
   if(!cloud.admin || !priv || pushTimerActive()) return;
-  let next; try{ next=clean(JSON.parse(priv.json)) }catch(e){ return }
+  const next=readPriv(priv,false); // 古い版のアプリが保存したもの（古い形）は無視する
   if(!next) return;
   if(JSON.stringify(next)===JSON.stringify(S)){ cloud.baseAt=Math.max(cloud.baseAt||0,priv.at||0); return; }
   cloud.baseAt=priv.at||0;

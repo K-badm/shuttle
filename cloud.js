@@ -28,7 +28,9 @@ if (FB) {
         const run = (a, b) => F.runTransaction(db, async tx => {
           const cur = await tx.get(privRef);
           const at = cur.exists() ? (cur.data().at || 0) : 0;
-          if (cur.exists() && at > baseAt) return { conflict: true, data: cur.data() };
+          // 古い版のアプリが保存したもの（json が {fmt:2,...} でない）は、新しくても上書きしてよい
+          let fresh = false; try { fresh = JSON.parse(cur.data().json).fmt === 2; } catch (e) {}
+          if (cur.exists() && fresh && at > baseAt) return { conflict: true, data: cur.data() };
           tx.set(privRef, a); tx.set(pubRef, b);
           return { conflict: false };
         });
